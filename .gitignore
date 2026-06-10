@@ -1,0 +1,30 @@
+# --- Secrets: never commit a real token ---
+# The refresh token lives in ~/.config/pixiv-slides/config.toml, but guard
+# against any copy landing in the repo.
+config.toml
+config.toml.bak
+*.local
+.env
+.env.*
+secrets.*
+
+# --- Rust / Tauri build output ---
+/src-tauri/target/
+/src-tauri/gen/schemas
+target/
+
+# --- Node (in case frontend tooling is added later) ---
+node_modules/
+dist/
+.npm/
+
+# --- Logs ---
+*.log
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

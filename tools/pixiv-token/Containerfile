@@ -1,0 +1,9 @@
+# Containerized Pixiv refresh-token extractor using gppt (Playwright-based).
+# The Playwright Python base image already bundles Chromium + all system libs.
+FROM mcr.microsoft.com/playwright/python:v1.57.0-jammy
+
+RUN pip install --no-cache-dir gppt \
+    && python -m playwright install chromium
+
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["gppt"]
