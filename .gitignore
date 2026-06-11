@@ -13,10 +13,11 @@ secrets.*
 /src-tauri/gen/schemas
 target/
 
-# --- Node (in case frontend tooling is added later) ---
+# --- Node / Vite frontend ---
 node_modules/
 dist/
 .npm/
+*.tsbuildinfo
 
 # --- Logs ---
 *.log

@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "identifier": "net.pixiv.slides",
   "build": {
-    "frontendDist": "../src"
+    "beforeDevCommand": "./tools/frontend/fe.sh dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "./tools/frontend/fe.sh build",
+    "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "title": "pixiv-slides",

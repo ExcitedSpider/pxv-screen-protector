@@ -5,8 +5,8 @@ A dead-simple full-screen slideshow of the illustrations your followed
 account, go full-screen, and let it cycle — a pleasant "screen protector" built
 from your own following feed instead of fighting Pixiv's website.
 
-Built with [Tauri](https://tauri.app/) (Rust backend + a tiny vanilla-JS
-frontend) for Linux / Fedora / KDE.
+Built with [Tauri](https://tauri.app/) — a Rust backend and a React + Vite +
+TypeScript + Tailwind frontend — for Linux / Fedora / KDE.
 
 > **Status:** proof-of-concept. It works end to end but is intentionally
 > minimal — no in-app login, bookmarking, or history beyond yesterday.
@@ -42,6 +42,8 @@ frontend) for Linux / Fedora / KDE.
 - Fedora / KDE (or any Linux with a Wayland or X11 session)
 - [Rust](https://rustup.rs/) (stable) and the Tauri CLI
 - System libraries for the WebKit webview
+- [Podman](https://podman.io/) — the frontend toolchain (Node/Vite) runs in a
+  container, so **no Node is needed on the host**
 
 ## Setup
 
@@ -92,12 +94,18 @@ Both write `~/.config/pixiv-slides/config.toml`.
 
 ### 3. Run
 
+From the **repo root** (not `src-tauri/`):
+
 ```bash
-cd src-tauri
-cargo tauri dev      # development
+cargo tauri dev      # development — boots the Vite container, then the app
 # or
-cargo tauri build    # optimized binary in target/release/
+cargo tauri build    # optimized binary in src-tauri/target/release/
 ```
+
+`cargo tauri dev` runs the frontend toolchain in a Podman container
+(`tools/frontend/fe.sh`) via Tauri's `beforeDevCommand`, installing
+`node_modules` automatically on first run. Press `esc` to quit (this also tears
+down the Vite container).
 
 ## Controls
 
