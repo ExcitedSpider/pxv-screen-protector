@@ -14,3 +14,18 @@ body {
   cursor: none;
   font-family: "Segoe UI", "Noto Sans", system-ui, sans-serif;
 }
+
+@keyframes loading-slide {
+  0% {
+    left: -35%;
+    width: 35%;
+  }
+  60% {
+    left: 60%;
+    width: 45%;
+  }
+  100% {
+    left: 100%;
+    width: 25%;
+  }
+}

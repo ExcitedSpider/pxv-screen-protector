@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Slideshow } from "./components/Slideshow";
 import { StatusBar } from "./components/StatusBar";
 import { StatusOverlay } from "./components/StatusOverlay";
+import { LoadingBar } from "./components/LoadingBar";
 import {
   loadSlideshow,
   systemStats,
@@ -20,6 +21,7 @@ export default function App() {
   const [navTick, setNavTick] = useState(0); // bumped to reset the countdown
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [clock, setClock] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -135,7 +137,11 @@ export default function App() {
 
   return (
     <>
-      <Slideshow url={current ? pximg(current.image_url) : ""} />
+      <Slideshow
+        url={current ? pximg(current.image_url) : ""}
+        onLoadingChange={setLoading}
+      />
+      <LoadingBar active={loading} />
       <StatusOverlay message={overlay} />
       <StatusBar
         slide={current}

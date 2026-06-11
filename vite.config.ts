@@ -16,7 +16,7 @@ export default defineConfig({
     watch: {
       usePolling: true,
       interval: 300,
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/*.tsbuildinfo", "**/dist/**"],
     },
   },
 });
