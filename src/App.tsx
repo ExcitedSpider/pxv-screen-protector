@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Slideshow } from "./components/Slideshow";
 import { StatusBar } from "./components/StatusBar";
 import { StatusOverlay } from "./components/StatusOverlay";
 import { LoadingBar } from "./components/LoadingBar";
+import { Toast } from "./components/Toast";
 import {
   loadSlideshow,
   systemStats,
+  saveIllustration,
   quit,
   pximg,
   type Slide,
@@ -22,6 +24,16 @@ export default function App() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [clock, setClock] = useState("");
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+  // Latest slide, reachable from the (stable) keyboard handler.
+  const currentRef = useRef<Slide | undefined>(undefined);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -55,13 +67,17 @@ export default function App() {
     return () => clearInterval(id);
   }, [paused, slides.length, intervalMs, navTick]);
 
-  // Preload the next image.
+  // Preload both neighbours so stepping either way stays instant (the webview
+  // keeps them decoded in memory).
   useEffect(() => {
     if (slides.length < 2) return;
-    const next = slides[(idx + 1) % slides.length];
-    if (next) {
-      const img = new Image();
-      img.src = pximg(next.image_url);
+    const n = slides.length;
+    for (const offset of [1, -1]) {
+      const neighbour = slides[(idx + offset + n) % n];
+      if (neighbour) {
+        const img = new Image();
+        img.src = pximg(neighbour.image_url);
+      }
     }
   }, [idx, slides]);
 
@@ -89,6 +105,16 @@ export default function App() {
         case "R":
           load();
           break;
+        case "s":
+        case "S": {
+          const slide = currentRef.current;
+          if (!slide) break;
+          showToast("Saving…");
+          saveIllustration(slide)
+            .then(showToast)
+            .catch((err) => showToast("Save failed: " + String(err)));
+          break;
+        }
         case "Escape":
           quit();
           break;
@@ -96,7 +122,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, load]);
+  }, [slides.length, load, showToast]);
 
   // System stats, every 2s.
   useEffect(() => {
@@ -134,6 +160,7 @@ export default function App() {
 
   const current = slides[idx];
   const overlay = paused && slides.length ? "⏸ paused" : message;
+  currentRef.current = current;
 
   return (
     <>
@@ -143,6 +170,7 @@ export default function App() {
       />
       <LoadingBar active={loading} />
       <StatusOverlay message={overlay} />
+      <Toast message={toast} />
       <StatusBar
         slide={current}
         idx={idx}

@@ -28,6 +28,10 @@ export const loadSlideshow = () => invoke<SlideShow>("load_slideshow");
 export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 
+/** Save the given illustration to the configured folder; returns a status string. */
+export const saveIllustration = (slide: Slide) =>
+  invoke<string>("save_illustration", { slide });
+
 /** Wrap a raw i.pximg.net URL in the custom protocol that adds the Referer. */
 export const pximg = (url: string) =>
   "pximg://localhost/" + encodeURIComponent(url);
