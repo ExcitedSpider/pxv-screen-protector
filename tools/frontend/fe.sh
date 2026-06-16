@@ -23,7 +23,8 @@ case "$MODE" in
     exec podman run "${COMMON[@]}" npm install
     ;;
   dev)
-    exec podman run -p 1420:1420 "${COMMON[@]}" \
+    # --name + --replace so a leftover container never blocks port 1420.
+    exec podman run --name pixiv-slides-vite --replace -p 1420:1420 "${COMMON[@]}" \
       sh -c '[ -d node_modules ] || npm install; exec npm run dev'
     ;;
   build)
