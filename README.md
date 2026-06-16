@@ -113,6 +113,7 @@ down the Vite container).
 |-----|--------|
 | `←` / `→` | previous / next slide |
 | `space`   | pause / resume |
+| `s`       | save the current illustration to `save_dir` |
 | `r`       | reload the feed |
 | `esc`     | quit |
 
@@ -121,11 +122,17 @@ down the Vite container).
 `~/.config/pixiv-slides/config.toml`:
 
 ```toml
-refresh_token = "..."        # required
-slide_interval_secs = 300    # seconds between slides (default 5 min)
-max_pages_per_post = 3       # cap on images shown per multi-page post
-empty_day_fallback = true    # if yesterday is empty, show today-so-far
+refresh_token = "..."                # required
+slide_interval_secs = 300            # seconds between slides (default 5 min)
+max_pages_per_post = 3               # cap on images shown per multi-page post
+empty_day_fallback = true            # if yesterday is empty, show today-so-far
+save_dir = "~/Pictures/pixiv-slides" # where pressing `s` saves illustrations
+cache_max_mb = 512                   # on-disk image cache cap in MB (0 disables)
 ```
+
+Viewed illustrations are cached on disk under `~/.cache/pixiv-slides/` so
+revisiting one doesn't re-download it. The cache is a self-pruning size-capped
+LRU (`cache_max_mb`); nothing is held in RAM, and it's safe to delete anytime.
 
 ## Privacy
 

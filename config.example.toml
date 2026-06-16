@@ -3,6 +3,8 @@
 refresh_token = "PASTE_YOUR_REFRESH_TOKEN_HERE"
 
 # Optional (defaults shown):
-slide_interval_secs = 300   # 5 minutes between slides
-max_pages_per_post = 3      # cap on images shown per multi-page post
-empty_day_fallback = true   # if yesterday is empty, show today-so-far
+slide_interval_secs = 300            # 5 minutes between slides
+max_pages_per_post = 3               # cap on images shown per multi-page post
+empty_day_fallback = true            # if yesterday is empty, show today-so-far
+save_dir = "~/Pictures/pixiv-slides" # where pressing `s` saves illustrations
+cache_max_mb = 512                   # on-disk image cache cap in MB (0 disables)

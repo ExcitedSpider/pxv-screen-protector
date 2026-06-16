@@ -16,6 +16,12 @@ pub struct Config {
     /// If yesterday's feed is empty, fall back to today-so-far.
     #[serde(default = "default_true")]
     pub empty_day_fallback: bool,
+    /// Folder to save illustrations into (supports a leading `~/`).
+    #[serde(default = "default_save_dir")]
+    pub save_dir: String,
+    /// On-disk image cache cap in MB (`0` disables caching).
+    #[serde(default = "default_cache_mb")]
+    pub cache_max_mb: u64,
 }
 
 fn default_interval() -> u64 {
@@ -26,6 +32,12 @@ fn default_max_pages() -> usize {
 }
 fn default_true() -> bool {
     true
+}
+fn default_save_dir() -> String {
+    "~/Pictures/pixiv-slides".to_string()
+}
+fn default_cache_mb() -> u64 {
+    512
 }
 
 /// `$XDG_CONFIG_HOME/pixiv-slides/config.toml`, falling back to `~/.config`.
