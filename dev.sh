@@ -2,7 +2,7 @@
 #
 # Launch the dev stack from the repo root, regardless of your current dir.
 # Equivalent to `cargo tauri dev`, which boots the Vite container via
-# beforeDevCommand. Ctrl-C stops everything cleanly.
+# beforeDevCommand. Ctrl-C/app exit stops the project Vite container.
 #
 # A leftover Vite container from a previous unclean exit is handled
 # automatically: fe.sh runs it with `--name pixiv-slides-vite --replace`, so a
@@ -10,4 +10,10 @@
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-exec cargo tauri dev "$@"
+
+cleanup() {
+    podman stop pixiv-slides-vite >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+cargo tauri dev "$@"
