@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Duration, Local};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 const FOLLOW_URL: &str = "https://app-api.pixiv.net/v2/illust/follow?restrict=public";
 const SEARCH_URL: &str = "https://app-api.pixiv.net/v1/search/illust";
@@ -61,15 +61,26 @@ pub struct Slide {
     pub page_count: u32,
     pub total_bookmarks: Option<u64>,
     pub source_tags: Vec<String>,
+    pub best_tag_rank: Option<usize>,
+    pub median_like_score: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
 struct SearchCandidate {
     illust: Illust,
     source_tags: Vec<String>,
+    best_tag_rank: usize,
+    median_like_score: f64,
 }
 
-fn push_slides(out: &mut Vec<Slide>, illust: &Illust, max_pages: usize, source_tags: &[String]) {
+fn push_slides(
+    out: &mut Vec<Slide>,
+    illust: &Illust,
+    max_pages: usize,
+    source_tags: &[String],
+    best_tag_rank: Option<usize>,
+    median_like_score: Option<f64>,
+) {
     let urls: Vec<String> = if illust.page_count <= 1 {
         illust
             .meta_single_page
@@ -100,6 +111,8 @@ fn push_slides(out: &mut Vec<Slide>, illust: &Illust, max_pages: usize, source_t
             page_count: illust.page_count,
             total_bookmarks: (illust.total_bookmarks > 0).then_some(illust.total_bookmarks),
             source_tags: source_tags.to_vec(),
+            best_tag_rank,
+            median_like_score,
         });
     }
 }
@@ -144,9 +157,9 @@ pub async fn fetch_yesterday_slides(
             let date = dt.with_timezone(&Local).date_naive();
 
             if date == yesterday {
-                push_slides(&mut slides, illust, max_pages_per_post, &[]);
+                push_slides(&mut slides, illust, max_pages_per_post, &[], None, None);
             } else if date >= today {
-                push_slides(&mut fallback, illust, max_pages_per_post, &[]);
+                push_slides(&mut fallback, illust, max_pages_per_post, &[], None, None);
             } else {
                 reached_older = true;
                 break;
@@ -253,6 +266,7 @@ pub async fn fetch_tag_slides(
             }
             Err(err) => return Err(err),
         };
+        assign_tag_metrics(tag, &mut candidates);
 
         for candidate in candidates.drain(..) {
             by_id
@@ -263,18 +277,36 @@ pub async fn fetch_tag_slides(
                             existing.source_tags.push(source_tag.clone());
                         }
                     }
+                    existing.best_tag_rank = existing.best_tag_rank.min(candidate.best_tag_rank);
+                    existing.median_like_score =
+                        existing.median_like_score.max(candidate.median_like_score);
                 })
                 .or_insert(candidate);
         }
     }
 
     let mut candidates: Vec<SearchCandidate> = by_id.into_values().collect();
-    candidates.sort_by(|a, b| {
-        b.illust
-            .total_bookmarks
-            .cmp(&a.illust.total_bookmarks)
-            .then_with(|| b.illust.id.cmp(&a.illust.id))
-    });
+    match tag_cfg.merge_strategy.trim() {
+        "raw_bookmarks" | "" => sort_by_bookmarks(&mut candidates),
+        "per_tag_rank" => candidates.sort_by(|a, b| {
+            a.best_tag_rank
+                .cmp(&b.best_tag_rank)
+                .then_with(|| b.illust.total_bookmarks.cmp(&a.illust.total_bookmarks))
+                .then_with(|| b.illust.id.cmp(&a.illust.id))
+        }),
+        "median_like_ratio" => candidates.sort_by(|a, b| {
+            b.median_like_score
+                .partial_cmp(&a.median_like_score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.illust.total_bookmarks.cmp(&a.illust.total_bookmarks))
+                .then_with(|| b.illust.id.cmp(&a.illust.id))
+        }),
+        other => {
+            return Err(format!(
+                "unsupported tag_feed.merge_strategy={other:?}; use \"raw_bookmarks\", \"per_tag_rank\", or \"median_like_ratio\""
+            ));
+        }
+    }
 
     let mut slides = Vec::new();
     for candidate in &candidates {
@@ -283,6 +315,8 @@ pub async fn fetch_tag_slides(
             &candidate.illust,
             max_pages_per_post,
             &candidate.source_tags,
+            Some(candidate.best_tag_rank),
+            Some(candidate.median_like_score),
         );
         if slides.len() >= tag_cfg.max_slides.max(1) {
             break;
@@ -325,7 +359,9 @@ async fn search_tag(
         for illust in resp.illusts {
             out.push(SearchCandidate {
                 illust,
-                source_tags: vec![tag.to_string()],
+                source_tags: Vec::new(),
+                best_tag_rank: usize::MAX,
+                median_like_score: 0.0,
             });
             if out.len() >= result_limit {
                 return Ok(out);
@@ -337,6 +373,49 @@ async fn search_tag(
         }
     }
     Ok(out)
+}
+
+fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate]) {
+    let sample_median = sample_median_bookmarks(candidates);
+    for (idx, candidate) in candidates.iter_mut().enumerate() {
+        candidate.source_tags = vec![tag.to_string()];
+        candidate.best_tag_rank = idx + 1;
+        candidate.median_like_score =
+            median_like_score(candidate.illust.total_bookmarks, sample_median);
+    }
+}
+
+fn sample_median_bookmarks(candidates: &[SearchCandidate]) -> f64 {
+    if candidates.is_empty() {
+        return 0.0;
+    }
+    let mut likes: Vec<u64> = candidates.iter().map(|c| c.illust.total_bookmarks).collect();
+    likes.sort_unstable();
+    let mid = likes.len() / 2;
+    if likes.len() % 2 == 1 {
+        likes[mid] as f64
+    } else {
+        (likes[mid - 1] as f64 + likes[mid] as f64) / 2.0
+    }
+}
+
+fn median_like_score(likes: u64, sample_median: f64) -> f64 {
+    let numerator = ((likes as f64) + 1.0).ln();
+    let denominator = (sample_median + 1.0).ln();
+    if denominator > f64::EPSILON {
+        numerator / denominator
+    } else {
+        numerator
+    }
+}
+
+fn sort_by_bookmarks(candidates: &mut [SearchCandidate]) {
+    candidates.sort_by(|a, b| {
+        b.illust
+            .total_bookmarks
+            .cmp(&a.illust.total_bookmarks)
+            .then_with(|| b.illust.id.cmp(&a.illust.id))
+    });
 }
 
 async fn get_search_page(

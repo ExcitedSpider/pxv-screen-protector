@@ -11,6 +11,8 @@ export interface Slide {
   page_count: number;
   total_bookmarks: number | null;
   source_tags: string[];
+  best_tag_rank: number | null;
+  median_like_score: number | null;
 }
 
 export interface SlideShow {
@@ -19,6 +21,32 @@ export interface SlideShow {
   day: string;
   feed_mode: FeedMode;
   label: string;
+  help: HelpInfo;
+}
+
+export interface HelpInfo {
+  configured_feed_mode: string;
+  slide_interval_secs: number;
+  max_pages_per_post: number;
+  following_daily: FollowingDailyHelp;
+  tag_search: TagSearchHelp;
+}
+
+export interface FollowingDailyHelp {
+  day: string;
+  empty_day_fallback: boolean;
+}
+
+export interface TagSearchHelp {
+  tags: string[];
+  range_days: number;
+  search_target: string;
+  sort: string;
+  max_results_per_tag: number;
+  max_search_pages_per_tag: number;
+  max_slides: number;
+  fallback_without_popular_sort: string;
+  merge_strategy: string;
 }
 
 export interface SystemStats {

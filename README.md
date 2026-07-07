@@ -35,7 +35,8 @@ TypeScript + Tailwind frontend — for Linux / Fedora / KDE.
   filtered to yesterday in your **local** timezone.
 - **Tag feed** — the `v1/search/illust` endpoint searches configured tags over
   a local date range, sorted by Pixiv's `popular_desc` popularity order when
-  available. Results are merged, deduplicated, and expanded into slides.
+  available. Results are ranked per tag, merged, deduplicated, and expanded
+  into slides.
 - **Images** — `i.pximg.net` blocks hotlinking, so the Rust side proxies every
   image through a custom `pximg://` protocol that attaches the required
   `Referer` header. The webview never talks to Pixiv directly.
@@ -121,7 +122,8 @@ down the Vite container).
 | `s`       | save the current illustration to `save_dir` |
 | `r`       | reload the feed |
 | `m`       | switch between following feed and tag feed |
-| `esc`     | quit |
+| `?`       | show / hide help |
+| `esc`     | close help, otherwise quit |
 
 ## Configuration
 
@@ -145,7 +147,16 @@ max_results_per_tag = 30
 max_search_pages_per_tag = 10
 max_slides = 120
 fallback_without_popular_sort = "error" # or "local_bookmark_sort"
+merge_strategy = "raw_bookmarks"     # or "per_tag_rank", "median_like_ratio"
 ```
+
+`tag_feed.merge_strategy = "raw_bookmarks"` keeps the current behavior: all
+tag-search results are globally sorted by bookmark count. `"per_tag_rank"`
+sorts by each work's best rank within its own tag first, then uses bookmark
+count as a tie-breaker, so broad popular tags do not dominate the front of the
+feed. `"median_like_ratio"` sorts by `log(bookmarks + 1) / log(sample_median +
+1)`, where `sample_median` is the median bookmark count of the fetched sample
+for that tag.
 
 Viewed illustrations are cached on disk under `~/.cache/pixiv-slides/` so
 revisiting one doesn't re-download it. The cache is a self-pruning size-capped

@@ -20,3 +20,4 @@ max_results_per_tag = 30
 max_search_pages_per_tag = 10        # safety cap, mainly for fallback mode
 max_slides = 120
 fallback_without_popular_sort = "error" # or "local_bookmark_sort"
+merge_strategy = "raw_bookmarks"     # or "per_tag_rank", "median_like_ratio"

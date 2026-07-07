@@ -25,10 +25,18 @@ export function StatusBar({
     slide?.total_bookmarks != null
       ? `${slide.total_bookmarks.toLocaleString()} bookmarks`
       : "";
+  const rankInfo =
+    slide?.best_tag_rank != null ? `rank #${slide.best_tag_rank}` : "";
+  const scoreInfo =
+    slide?.median_like_score != null
+      ? `score ${slide.median_like_score.toFixed(2)}x`
+      : "";
   const tagInfo = slide?.source_tags?.length
     ? slide.source_tags.map((tag) => `#${tag}`).join(" ")
     : "";
-  const metaInfo = [bookmarkInfo, tagInfo].filter(Boolean).join(" · ");
+  const metaInfo = [bookmarkInfo, rankInfo, scoreInfo, tagInfo]
+    .filter(Boolean)
+    .join(" · ");
   const modeInfo = feedMode === "tag_search" ? "Tags" : "Following";
 
   return (

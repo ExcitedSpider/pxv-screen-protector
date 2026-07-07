@@ -18,6 +18,35 @@ pub struct SlideShow {
     feed_mode: String,
     /// Human-readable range/source label for empty states.
     label: String,
+    help: HelpInfo,
+}
+
+#[derive(Serialize)]
+pub struct HelpInfo {
+    configured_feed_mode: String,
+    slide_interval_secs: u64,
+    max_pages_per_post: usize,
+    following_daily: FollowingDailyHelp,
+    tag_search: TagSearchHelp,
+}
+
+#[derive(Serialize)]
+pub struct FollowingDailyHelp {
+    day: String,
+    empty_day_fallback: bool,
+}
+
+#[derive(Serialize)]
+pub struct TagSearchHelp {
+    tags: Vec<String>,
+    range_days: i64,
+    search_target: String,
+    sort: String,
+    max_results_per_tag: usize,
+    max_search_pages_per_tag: usize,
+    max_slides: usize,
+    fallback_without_popular_sort: String,
+    merge_strategy: String,
 }
 
 /// Load config, refresh the token, and fetch the configured feed.
@@ -30,12 +59,12 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
 
     let token = auth::refresh(&client, &cfg.refresh_token).await?;
     let yesterday = (chrono::Local::now().date_naive() - chrono::Duration::days(1)).to_string();
-    let configured_feed_mode = cfg.feed_mode.trim();
+    let configured_feed_mode = cfg.feed_mode.trim().to_string();
     let feed_mode = mode
         .as_deref()
         .map(str::trim)
         .filter(|mode| !mode.is_empty())
-        .unwrap_or(configured_feed_mode);
+        .unwrap_or(configured_feed_mode.as_str());
 
     let (slides, label, canonical_feed_mode) = match feed_mode {
         "following_daily" | "daily" => {
@@ -79,9 +108,29 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
     Ok(SlideShow {
         slides,
         interval_secs: cfg.slide_interval_secs,
-        day: yesterday,
+        day: yesterday.clone(),
         feed_mode: canonical_feed_mode.to_string(),
         label,
+        help: HelpInfo {
+            configured_feed_mode,
+            slide_interval_secs: cfg.slide_interval_secs,
+            max_pages_per_post: cfg.max_pages_per_post,
+            following_daily: FollowingDailyHelp {
+                day: yesterday,
+                empty_day_fallback: cfg.empty_day_fallback,
+            },
+            tag_search: TagSearchHelp {
+                tags: cfg.tag_feed.tags,
+                range_days: cfg.tag_feed.range_days.clamp(1, 366),
+                search_target: cfg.tag_feed.search_target,
+                sort: cfg.tag_feed.sort,
+                max_results_per_tag: cfg.tag_feed.max_results_per_tag,
+                max_search_pages_per_tag: cfg.tag_feed.max_search_pages_per_tag,
+                max_slides: cfg.tag_feed.max_slides,
+                fallback_without_popular_sort: cfg.tag_feed.fallback_without_popular_sort,
+                merge_strategy: cfg.tag_feed.merge_strategy,
+            },
+        },
     })
 }
 

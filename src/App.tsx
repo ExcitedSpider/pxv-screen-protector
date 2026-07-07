@@ -4,6 +4,7 @@ import { StatusBar } from "./components/StatusBar";
 import { StatusOverlay } from "./components/StatusOverlay";
 import { LoadingBar } from "./components/LoadingBar";
 import { Toast } from "./components/Toast";
+import { HelpOverlay } from "./components/HelpOverlay";
 import {
   loadSlideshow,
   systemStats,
@@ -11,6 +12,7 @@ import {
   quit,
   pximg,
   type FeedMode,
+  type HelpInfo,
   type Slide,
   type SystemStats,
 } from "./lib/api";
@@ -20,6 +22,8 @@ const feedModeLabel = (mode?: FeedMode | null) =>
 
 const nextFeedMode = (mode?: FeedMode | null): FeedMode =>
   mode === "tag_search" ? "following_daily" : "tag_search";
+
+const isHelpKey = (e: KeyboardEvent) => e.key === "?" || (e.key === "/" && e.shiftKey);
 
 export default function App() {
   const [slides, setSlides] = useState<Slide[]>([]);
@@ -33,6 +37,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [feedMode, setFeedMode] = useState<FeedMode | null>(null);
+  const [helpInfo, setHelpInfo] = useState<HelpInfo | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // Latest slide, reachable from the (stable) keyboard handler.
   const currentRef = useRef<Slide | undefined>(undefined);
@@ -55,6 +61,7 @@ export default function App() {
       const data = await loadSlideshow(requestedMode);
       feedModeRef.current = data.feed_mode;
       setFeedMode(data.feed_mode);
+      setHelpInfo(data.help);
       setIntervalMs(data.interval_secs * 1000);
       if (data.slides.length === 0) {
         setSlides([]);
@@ -104,6 +111,18 @@ export default function App() {
   // Keyboard controls.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isHelpKey(e)) {
+        e.preventDefault();
+        setHelpOpen((open) => !open);
+        return;
+      }
+      if (helpOpen) {
+        if (e.key === "Escape") {
+          setHelpOpen(false);
+        }
+        return;
+      }
+
       switch (e.key) {
         case "ArrowRight":
           if (slides.length) {
@@ -149,7 +168,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, load, showToast]);
+  }, [slides.length, load, showToast, helpOpen]);
 
   // System stats, every 2s.
   useEffect(() => {
@@ -198,6 +217,7 @@ export default function App() {
       <LoadingBar active={loading} />
       <StatusOverlay message={overlay} />
       <Toast message={toast} />
+      <HelpOverlay open={helpOpen} activeMode={feedMode} help={helpInfo} />
       <StatusBar
         slide={current}
         idx={idx}

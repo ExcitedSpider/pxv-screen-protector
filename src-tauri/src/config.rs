@@ -56,6 +56,9 @@ pub struct TagFeedConfig {
     /// `error` or `local_bookmark_sort` when `popular_desc` is unavailable.
     #[serde(default = "default_popular_fallback")]
     pub fallback_without_popular_sort: String,
+    /// `raw_bookmarks`, `per_tag_rank`, or `median_like_ratio` when merging tags.
+    #[serde(default = "default_merge_strategy")]
+    pub merge_strategy: String,
 }
 
 impl Default for TagFeedConfig {
@@ -69,6 +72,7 @@ impl Default for TagFeedConfig {
             max_search_pages_per_tag: default_max_search_pages_per_tag(),
             max_slides: default_max_tag_slides(),
             fallback_without_popular_sort: default_popular_fallback(),
+            merge_strategy: default_merge_strategy(),
         }
     }
 }
@@ -111,6 +115,9 @@ fn default_max_tag_slides() -> usize {
 }
 fn default_popular_fallback() -> String {
     "error".to_string()
+}
+fn default_merge_strategy() -> String {
+    "raw_bookmarks".to_string()
 }
 
 /// `$XDG_CONFIG_HOME/pixiv-slides/config.toml`, falling back to `~/.config`.
