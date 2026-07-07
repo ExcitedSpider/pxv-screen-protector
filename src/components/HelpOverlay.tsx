@@ -13,6 +13,8 @@ const decayText = (lambda?: number) => {
 
 const rows = [
   ["Left / Right", "previous / next slide"],
+  ["Page Up / Down", "jump back / forward 10 slides"],
+  ["Home / End", "first / last slide"],
   ["Space", "pause / resume"],
   ["S", "save current illustration"],
   ["R", "reload current feed"],

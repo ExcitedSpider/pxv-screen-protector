@@ -50,6 +50,15 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
 
+  const stepSlides = useCallback((delta: number) => {
+    setIdx((i) => {
+      const n = slides.length;
+      if (!n) return i;
+      return (i + delta + n) % n;
+    });
+    setNavTick((t) => t + 1);
+  }, [slides.length]);
+
   const load = useCallback(async (mode?: FeedMode) => {
     const requestedMode = mode ?? feedModeRef.current ?? undefined;
     try {
@@ -125,14 +134,26 @@ export default function App() {
 
       switch (e.key) {
         case "ArrowRight":
+          stepSlides(1);
+          break;
+        case "ArrowLeft":
+          stepSlides(-1);
+          break;
+        case "PageDown":
+          stepSlides(10);
+          break;
+        case "PageUp":
+          stepSlides(-10);
+          break;
+        case "Home":
           if (slides.length) {
-            setIdx((i) => (i + 1) % slides.length);
+            setIdx(0);
             setNavTick((t) => t + 1);
           }
           break;
-        case "ArrowLeft":
+        case "End":
           if (slides.length) {
-            setIdx((i) => (i - 1 + slides.length) % slides.length);
+            setIdx(slides.length - 1);
             setNavTick((t) => t + 1);
           }
           break;
@@ -168,7 +189,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, load, showToast, helpOpen]);
+  }, [slides.length, load, showToast, helpOpen, stepSlides]);
 
   // System stats, every 2s.
   useEffect(() => {

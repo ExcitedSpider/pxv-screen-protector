@@ -178,6 +178,8 @@ cargo tauri build
 | Key | Action |
 |-----|--------|
 | `Left` / `Right` | previous / next slide |
+| `Page Up` / `Page Down` | jump back / forward 10 slides |
+| `Home` / `End` | first / last slide |
 | `Space` | pause / resume |
 | `S` | save the current illustration to `save_dir` |
 | `R` | reload the current feed |
