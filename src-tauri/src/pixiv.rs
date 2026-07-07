@@ -266,6 +266,7 @@ pub async fn fetch_tag_slides(
             }
             Err(err) => return Err(err),
         };
+        candidates.retain(|candidate| candidate.illust.total_bookmarks >= tag_cfg.min_bookmarks);
         assign_tag_metrics(tag, &mut candidates);
 
         for candidate in candidates.drain(..) {

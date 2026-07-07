@@ -126,6 +126,10 @@ export function HelpOverlay({
                   value={`${help?.tag_search.max_results_per_tag ?? 30} results`}
                 />
                 <ConfigRow
+                  label="Min bookmarks"
+                  value={`${help?.tag_search.min_bookmarks ?? 0}`}
+                />
+                <ConfigRow
                   label="Page scan cap"
                   value={`${help?.tag_search.max_search_pages_per_tag ?? 10} pages`}
                 />

@@ -17,6 +17,7 @@ range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"
 sort = "popular_desc"                # Pixiv Premium popularity sort
 max_results_per_tag = 30
+min_bookmarks = 0                    # drop tag results below this bookmark count
 max_search_pages_per_tag = 10        # safety cap, mainly for fallback mode
 max_slides = 120
 fallback_without_popular_sort = "error" # or "local_bookmark_sort"

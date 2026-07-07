@@ -47,6 +47,9 @@ pub struct TagFeedConfig {
     /// Top illustrations to keep from each tag.
     #[serde(default = "default_max_results_per_tag")]
     pub max_results_per_tag: usize,
+    /// Drop tag-search works below this bookmark count before ranking/merging.
+    #[serde(default)]
+    pub min_bookmarks: u64,
     /// Safety cap on search pagination per tag.
     #[serde(default = "default_max_search_pages_per_tag")]
     pub max_search_pages_per_tag: usize,
@@ -69,6 +72,7 @@ impl Default for TagFeedConfig {
             search_target: default_search_target(),
             sort: default_search_sort(),
             max_results_per_tag: default_max_results_per_tag(),
+            min_bookmarks: 0,
             max_search_pages_per_tag: default_max_search_pages_per_tag(),
             max_slides: default_max_tag_slides(),
             fallback_without_popular_sort: default_popular_fallback(),

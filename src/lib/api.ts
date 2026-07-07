@@ -43,6 +43,7 @@ export interface TagSearchHelp {
   search_target: string;
   sort: string;
   max_results_per_tag: number;
+  min_bookmarks: number;
   max_search_pages_per_tag: number;
   max_slides: number;
   fallback_without_popular_sort: string;

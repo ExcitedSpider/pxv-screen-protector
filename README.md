@@ -137,6 +137,7 @@ range_days = 30
 search_target = "exact_match_for_tags"
 sort = "popular_desc"
 max_results_per_tag = 50
+min_bookmarks = 50
 max_search_pages_per_tag = 5
 max_slides = 120
 fallback_without_popular_sort = "local_bookmark_sort"
@@ -207,6 +208,7 @@ range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"
 sort = "popular_desc"                # Pixiv Premium popularity sort
 max_results_per_tag = 30             # sample size per tag
+min_bookmarks = 0                    # drop tag results below this bookmark count
 max_search_pages_per_tag = 10        # pagination safety cap
 max_slides = 120                     # final slide cap after merge/page expansion
 fallback_without_popular_sort = "error" # or "local_bookmark_sort"
@@ -242,10 +244,11 @@ max_results_per_tag = 30
 max_slides = 120
 ```
 
-the app fetches up to 150 tag-results, deduplicates them, sorts them, expands
-multi-page posts up to `max_pages_per_post`, then stops at 120 slides. Because
-`max_slides` counts slides, not illustrations, multi-page posts can reduce the
-number of distinct works shown.
+the app fetches up to 150 tag-results, filters out anything below
+`min_bookmarks`, deduplicates the survivors, sorts them, expands multi-page
+posts up to `max_pages_per_post`, then stops at 120 slides. Because `max_slides`
+counts slides, not illustrations, multi-page posts can reduce the number of
+distinct works shown.
 
 ## Privacy
 
