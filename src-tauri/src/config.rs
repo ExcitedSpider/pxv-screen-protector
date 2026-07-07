@@ -7,6 +7,9 @@ use std::path::PathBuf;
 pub struct Config {
     /// Pixiv OAuth refresh token (the only required field).
     pub refresh_token: String,
+    /// Which feed to load: `following_daily` or `tag_search`.
+    #[serde(default = "default_feed_mode")]
+    pub feed_mode: String,
     /// Seconds between slides.
     #[serde(default = "default_interval")]
     pub slide_interval_secs: u64,
@@ -22,8 +25,57 @@ pub struct Config {
     /// On-disk image cache cap in MB (`0` disables caching).
     #[serde(default = "default_cache_mb")]
     pub cache_max_mb: u64,
+    /// Tag-search mode options.
+    #[serde(default)]
+    pub tag_feed: TagFeedConfig,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TagFeedConfig {
+    /// Tags to search independently, then merge by popularity.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Search range in local days, inclusive of today.
+    #[serde(default = "default_tag_range_days")]
+    pub range_days: i64,
+    /// Pixiv search target, usually `exact_match_for_tags`.
+    #[serde(default = "default_search_target")]
+    pub search_target: String,
+    /// Pixiv sort, usually `popular_desc` (Premium account feature).
+    #[serde(default = "default_search_sort")]
+    pub sort: String,
+    /// Top illustrations to keep from each tag.
+    #[serde(default = "default_max_results_per_tag")]
+    pub max_results_per_tag: usize,
+    /// Safety cap on search pagination per tag.
+    #[serde(default = "default_max_search_pages_per_tag")]
+    pub max_search_pages_per_tag: usize,
+    /// Overall slide cap after merging tags and expanding multi-page posts.
+    #[serde(default = "default_max_tag_slides")]
+    pub max_slides: usize,
+    /// `error` or `local_bookmark_sort` when `popular_desc` is unavailable.
+    #[serde(default = "default_popular_fallback")]
+    pub fallback_without_popular_sort: String,
+}
+
+impl Default for TagFeedConfig {
+    fn default() -> Self {
+        Self {
+            tags: Vec::new(),
+            range_days: default_tag_range_days(),
+            search_target: default_search_target(),
+            sort: default_search_sort(),
+            max_results_per_tag: default_max_results_per_tag(),
+            max_search_pages_per_tag: default_max_search_pages_per_tag(),
+            max_slides: default_max_tag_slides(),
+            fallback_without_popular_sort: default_popular_fallback(),
+        }
+    }
+}
+
+fn default_feed_mode() -> String {
+    "following_daily".to_string()
+}
 fn default_interval() -> u64 {
     300
 }
@@ -39,6 +91,27 @@ fn default_save_dir() -> String {
 fn default_cache_mb() -> u64 {
     512
 }
+fn default_tag_range_days() -> i64 {
+    30
+}
+fn default_search_target() -> String {
+    "exact_match_for_tags".to_string()
+}
+fn default_search_sort() -> String {
+    "popular_desc".to_string()
+}
+fn default_max_results_per_tag() -> usize {
+    30
+}
+fn default_max_search_pages_per_tag() -> usize {
+    10
+}
+fn default_max_tag_slides() -> usize {
+    120
+}
+fn default_popular_fallback() -> String {
+    "error".to_string()
+}
 
 /// `$XDG_CONFIG_HOME/pixiv-slides/config.toml`, falling back to `~/.config`.
 pub fn config_path() -> PathBuf {
@@ -46,7 +119,9 @@ pub fn config_path() -> PathBuf {
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default();
             home.join(".config")
         });
     base.join("pixiv-slides").join("config.toml")

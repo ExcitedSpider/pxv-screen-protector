@@ -10,9 +10,16 @@ import {
   saveIllustration,
   quit,
   pximg,
+  type FeedMode,
   type Slide,
   type SystemStats,
 } from "./lib/api";
+
+const feedModeLabel = (mode?: FeedMode | null) =>
+  mode === "tag_search" ? "Tag feed" : "Following feed";
+
+const nextFeedMode = (mode?: FeedMode | null): FeedMode =>
+  mode === "tag_search" ? "following_daily" : "tag_search";
 
 export default function App() {
   const [slides, setSlides] = useState<Slide[]>([]);
@@ -25,9 +32,11 @@ export default function App() {
   const [clock, setClock] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [feedMode, setFeedMode] = useState<FeedMode | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   // Latest slide, reachable from the (stable) keyboard handler.
   const currentRef = useRef<Slide | undefined>(undefined);
+  const feedModeRef = useRef<FeedMode | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -35,14 +44,25 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (mode?: FeedMode) => {
+    const requestedMode = mode ?? feedModeRef.current ?? undefined;
     try {
-      setMessage("Loading your feed…");
-      const data = await loadSlideshow();
+      setMessage(
+        requestedMode
+          ? `Loading ${feedModeLabel(requestedMode).toLowerCase()}…`
+          : "Loading your feed…",
+      );
+      const data = await loadSlideshow(requestedMode);
+      feedModeRef.current = data.feed_mode;
+      setFeedMode(data.feed_mode);
       setIntervalMs(data.interval_secs * 1000);
       if (data.slides.length === 0) {
         setSlides([]);
-        setMessage(`No illustrations from your follows for ${data.day}.`);
+        const empty =
+          data.feed_mode === "tag_search"
+            ? "No illustrations found for tags"
+            : "No illustrations from your follows";
+        setMessage(`${empty} for ${data.label || data.day}.`);
         return;
       }
       setSlides(data.slides);
@@ -105,6 +125,13 @@ export default function App() {
         case "R":
           load();
           break;
+        case "m":
+        case "M": {
+          const nextMode = nextFeedMode(feedModeRef.current);
+          showToast(`Switching to ${feedModeLabel(nextMode).toLowerCase()}…`);
+          load(nextMode);
+          break;
+        }
         case "s":
         case "S": {
           const slide = currentRef.current;
@@ -177,6 +204,7 @@ export default function App() {
         total={slides.length}
         stats={stats}
         clock={clock}
+        feedMode={feedMode}
       />
     </>
   );

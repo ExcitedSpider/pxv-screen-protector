@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export type FeedMode = "following_daily" | "tag_search";
+
 export interface Slide {
   illust_id: number;
   title: string;
@@ -7,12 +9,16 @@ export interface Slide {
   image_url: string;
   page: number;
   page_count: number;
+  total_bookmarks: number | null;
+  source_tags: string[];
 }
 
 export interface SlideShow {
   slides: Slide[];
   interval_secs: number;
   day: string;
+  feed_mode: FeedMode;
+  label: string;
 }
 
 export interface SystemStats {
@@ -24,7 +30,8 @@ export interface SystemStats {
   network: string;
 }
 
-export const loadSlideshow = () => invoke<SlideShow>("load_slideshow");
+export const loadSlideshow = (mode?: FeedMode) =>
+  invoke<SlideShow>("load_slideshow", mode ? { mode } : {});
 export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 

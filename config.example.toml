@@ -3,8 +3,20 @@
 refresh_token = "PASTE_YOUR_REFRESH_TOKEN_HERE"
 
 # Optional (defaults shown):
+feed_mode = "following_daily"        # "following_daily" or "tag_search"
 slide_interval_secs = 300            # 5 minutes between slides
 max_pages_per_post = 3               # cap on images shown per multi-page post
 empty_day_fallback = true            # if yesterday is empty, show today-so-far
 save_dir = "~/Pictures/pixiv-slides" # where pressing `s` saves illustrations
 cache_max_mb = 512                   # on-disk image cache cap in MB (0 disables)
+
+# Used only when feed_mode = "tag_search".
+[tag_feed]
+tags = ["landscape", "original"]     # searched independently, then merged
+range_days = 30                      # local days, inclusive of today
+search_target = "exact_match_for_tags"
+sort = "popular_desc"                # Pixiv Premium popularity sort
+max_results_per_tag = 30
+max_search_pages_per_tag = 10        # safety cap, mainly for fallback mode
+max_slides = 120
+fallback_without_popular_sort = "error" # or "local_bookmark_sort"

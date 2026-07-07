@@ -18,6 +18,8 @@ TypeScript + Tailwind frontend — for Linux / Fedora / KDE.
 ## Features
 
 - Slideshows yesterday's uploads from the artists you follow (`illust/follow`).
+- Optional tag-search mode: searches configured tags over a date range and
+  shows the most-bookmarked illustrations.
 - Full-screen, with a smooth cross-fade between slides.
 - Advances every 5 minutes (configurable).
 - A bottom status bar: artist · title, slide position, CPU %, RAM, disk, network
@@ -29,8 +31,11 @@ TypeScript + Tailwind frontend — for Linux / Fedora / KDE.
 
 - **Auth** — your Pixiv OAuth *refresh token* is exchanged for a short-lived
   access token (the same flow pixivpy/the mobile app use).
-- **Feed** — the `v2/illust/follow` endpoint is paginated newest-first and
+- **Daily feed** — the `v2/illust/follow` endpoint is paginated newest-first and
   filtered to yesterday in your **local** timezone.
+- **Tag feed** — the `v1/search/illust` endpoint searches configured tags over
+  a local date range, sorted by Pixiv's `popular_desc` popularity order when
+  available. Results are merged, deduplicated, and expanded into slides.
 - **Images** — `i.pximg.net` blocks hotlinking, so the Rust side proxies every
   image through a custom `pximg://` protocol that attaches the required
   `Referer` header. The webview never talks to Pixiv directly.
@@ -115,6 +120,7 @@ down the Vite container).
 | `space`   | pause / resume |
 | `s`       | save the current illustration to `save_dir` |
 | `r`       | reload the feed |
+| `m`       | switch between following feed and tag feed |
 | `esc`     | quit |
 
 ## Configuration
@@ -123,11 +129,22 @@ down the Vite container).
 
 ```toml
 refresh_token = "..."                # required
+feed_mode = "following_daily"        # "following_daily" or "tag_search"
 slide_interval_secs = 300            # seconds between slides (default 5 min)
 max_pages_per_post = 3               # cap on images shown per multi-page post
 empty_day_fallback = true            # if yesterday is empty, show today-so-far
 save_dir = "~/Pictures/pixiv-slides" # where pressing `s` saves illustrations
 cache_max_mb = 512                   # on-disk image cache cap in MB (0 disables)
+
+[tag_feed]                           # used only with feed_mode = "tag_search"
+tags = ["landscape", "original"]     # searched independently, then merged
+range_days = 30                      # local days, inclusive of today
+search_target = "exact_match_for_tags"
+sort = "popular_desc"                # Pixiv Premium popularity sort
+max_results_per_tag = 30
+max_search_pages_per_tag = 10
+max_slides = 120
+fallback_without_popular_sort = "error" # or "local_bookmark_sort"
 ```
 
 Viewed illustrations are cached on disk under `~/.cache/pixiv-slides/` so
@@ -145,6 +162,10 @@ mobile-app client constants (the same ones every pixivpy-based tool ships).
 
 - Linux only; tested on Fedora / KDE (Wayland).
 - "Yesterday" is a single day in local time — no longer history.
+- Tag feed popularity sorting depends on Pixiv's unofficial `popular_desc`
+  search sort, which normally requires Pixiv Premium. Non-Premium accounts can
+  use `fallback_without_popular_sort = "local_bookmark_sort"`, but that only
+  approximates popularity within the scanned page cap.
 - The VPN indicator is a heuristic (detects an active `tun*`/`wg*` interface).
 - Uses Pixiv's unofficial app API, which may change without notice.
 

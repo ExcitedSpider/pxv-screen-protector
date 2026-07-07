@@ -1,4 +1,4 @@
-import type { Slide, SystemStats } from "../lib/api";
+import type { FeedMode, Slide, SystemStats } from "../lib/api";
 
 const gb = (kb: number, dp = 0) => (kb / 1048576).toFixed(dp);
 
@@ -10,15 +10,26 @@ export function StatusBar({
   total,
   stats,
   clock,
+  feedMode,
 }: {
   slide?: Slide;
   idx: number;
   total: number;
   stats: SystemStats | null;
   clock: string;
+  feedMode: FeedMode | null;
 }) {
   const pageInfo =
     slide && slide.page_count > 1 ? ` (${slide.page}/${slide.page_count})` : "";
+  const bookmarkInfo =
+    slide?.total_bookmarks != null
+      ? `${slide.total_bookmarks.toLocaleString()} bookmarks`
+      : "";
+  const tagInfo = slide?.source_tags?.length
+    ? slide.source_tags.map((tag) => `#${tag}`).join(" ")
+    : "";
+  const metaInfo = [bookmarkInfo, tagInfo].filter(Boolean).join(" · ");
+  const modeInfo = feedMode === "tag_search" ? "Tags" : "Following";
 
   return (
     <div
@@ -33,11 +44,20 @@ export function StatusBar({
               {slide.title}
               {pageInfo}
             </span>
+            {metaInfo && (
+              <>
+                <span className="opacity-60">—</span>
+                <span className="overflow-hidden text-ellipsis opacity-75">
+                  {metaInfo}
+                </span>
+              </>
+            )}
           </>
         )}
       </div>
 
       <div className="flex shrink-0 items-baseline gap-4 tabular-nums opacity-90">
+        <span>{modeInfo}</span>
         {total > 0 && (
           <span>
             {idx + 1} / {total}
