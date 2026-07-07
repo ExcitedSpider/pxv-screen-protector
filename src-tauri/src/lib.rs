@@ -48,6 +48,7 @@ pub struct TagSearchHelp {
     max_slides: usize,
     fallback_without_popular_sort: String,
     merge_strategy: String,
+    recency_decay_lambda: f64,
 }
 
 /// Load config, refresh the token, and fetch the configured feed.
@@ -131,6 +132,7 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
                 max_slides: cfg.tag_feed.max_slides,
                 fallback_without_popular_sort: cfg.tag_feed.fallback_without_popular_sort,
                 merge_strategy: cfg.tag_feed.merge_strategy,
+                recency_decay_lambda: cfg.tag_feed.recency_decay_lambda,
             },
         },
     })

@@ -25,7 +25,8 @@ TypeScript renders the slideshow UI.
 - Tag-feed merge strategies:
   - `raw_bookmarks`: globally sort by Pixiv bookmark count.
   - `per_tag_rank`: interleave tags by each work's rank within its own tag.
-  - `median_like_ratio`: sort by `log(bookmarks + 1) / log(sample_median + 1)`.
+  - `median_like_ratio`: normalize by tag median and optionally apply recency
+    decay.
 - Status bar with artist/title, slide position, feed mode, tag metadata, rank or
   score where available, CPU, RAM, disk, network type, and local clock.
 - Saves the current illustration with `s`.
@@ -142,6 +143,7 @@ max_search_pages_per_tag = 5
 max_slides = 120
 fallback_without_popular_sort = "local_bookmark_sort"
 merge_strategy = "median_like_ratio"
+recency_decay_lambda = 0.15
 ```
 
 See [config.example.toml](config.example.toml) for all defaults.
@@ -213,6 +215,7 @@ max_search_pages_per_tag = 10        # pagination safety cap
 max_slides = 120                     # final slide cap after merge/page expansion
 fallback_without_popular_sort = "error" # or "local_bookmark_sort"
 merge_strategy = "raw_bookmarks"     # "raw_bookmarks", "per_tag_rank", "median_like_ratio"
+recency_decay_lambda = 0.15          # median_like_ratio only; 0 disables
 ```
 
 ### Tag Merge Strategies
@@ -224,7 +227,7 @@ deduplicated and sorted by bookmark count descending.
 the best rank first. This prevents a broad, popular tag from filling the front
 of the feed by raw count alone. Bookmark count is still used as a tie-breaker.
 
-`median_like_ratio` computes a score per tag sample:
+`median_like_ratio` computes a median-normalized score per tag sample:
 
 ```text
 log(bookmarks + 1) / log(sample_median + 1)
@@ -232,7 +235,15 @@ log(bookmarks + 1) / log(sample_median + 1)
 
 `sample_median` is the median bookmark count among the fetched sample for that
 tag, not the full Pixiv tag population. If a work appears in multiple tags, the
-best score is used. Bookmark count and illustration id are tie-breakers.
+best score is used. It then applies recency decay:
+
+```text
+final_score = median_like_ratio * exp(-recency_decay_lambda * age_in_days)
+```
+
+The default `recency_decay_lambda = 0.15` gives a half-life of about 4.6 days.
+Set it to `0` to disable recency. Bookmark count and illustration id are
+tie-breakers.
 
 ### Sampling Notes
 

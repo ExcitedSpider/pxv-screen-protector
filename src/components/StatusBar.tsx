@@ -27,10 +27,9 @@ export function StatusBar({
       : "";
   const rankInfo =
     slide?.best_tag_rank != null ? `rank #${slide.best_tag_rank}` : "";
+  const score = slide?.ranking_score ?? slide?.median_like_score;
   const scoreInfo =
-    slide?.median_like_score != null
-      ? `score ${slide.median_like_score.toFixed(2)}x`
-      : "";
+    score != null ? `score ${score.toFixed(2)}x` : "";
   const tagInfo = slide?.source_tags?.length
     ? slide.source_tags.map((tag) => `#${tag}`).join(" ")
     : "";

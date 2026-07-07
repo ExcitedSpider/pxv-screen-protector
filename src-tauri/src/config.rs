@@ -62,6 +62,9 @@ pub struct TagFeedConfig {
     /// `raw_bookmarks`, `per_tag_rank`, or `median_like_ratio` when merging tags.
     #[serde(default = "default_merge_strategy")]
     pub merge_strategy: String,
+    /// Decay constant for recency in `median_like_ratio`; `0` disables it.
+    #[serde(default = "default_recency_decay_lambda")]
+    pub recency_decay_lambda: f64,
 }
 
 impl Default for TagFeedConfig {
@@ -77,6 +80,7 @@ impl Default for TagFeedConfig {
             max_slides: default_max_tag_slides(),
             fallback_without_popular_sort: default_popular_fallback(),
             merge_strategy: default_merge_strategy(),
+            recency_decay_lambda: default_recency_decay_lambda(),
         }
     }
 }
@@ -122,6 +126,9 @@ fn default_popular_fallback() -> String {
 }
 fn default_merge_strategy() -> String {
     "raw_bookmarks".to_string()
+}
+fn default_recency_decay_lambda() -> f64 {
+    0.15
 }
 
 /// `$XDG_CONFIG_HOME/pixiv-slides/config.toml`, falling back to `~/.config`.

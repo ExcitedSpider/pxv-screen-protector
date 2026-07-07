@@ -5,6 +5,12 @@ const modeName = (mode?: string | null) =>
 
 const boolText = (value?: boolean) => (value ? "enabled" : "disabled");
 
+const decayText = (lambda?: number) => {
+  const value = lambda ?? 0.15;
+  if (value <= 0) return "disabled";
+  return `${value.toFixed(3)} (${(Math.log(2) / value).toFixed(1)}d half-life)`;
+};
+
 const rows = [
   ["Left / Right", "previous / next slide"],
   ["Space", "pause / resume"],
@@ -144,6 +150,10 @@ export function HelpOverlay({
                 <ConfigRow
                   label="Merge"
                   value={help?.tag_search.merge_strategy ?? "raw_bookmarks"}
+                />
+                <ConfigRow
+                  label="Recency decay"
+                  value={decayText(help?.tag_search.recency_decay_lambda)}
                 />
               </dl>
             </div>

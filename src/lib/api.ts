@@ -13,6 +13,7 @@ export interface Slide {
   source_tags: string[];
   best_tag_rank: number | null;
   median_like_score: number | null;
+  ranking_score: number | null;
 }
 
 export interface SlideShow {
@@ -48,6 +49,7 @@ export interface TagSearchHelp {
   max_slides: number;
   fallback_without_popular_sort: string;
   merge_strategy: string;
+  recency_decay_lambda: number;
 }
 
 export interface SystemStats {

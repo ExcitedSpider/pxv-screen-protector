@@ -63,6 +63,7 @@ pub struct Slide {
     pub source_tags: Vec<String>,
     pub best_tag_rank: Option<usize>,
     pub median_like_score: Option<f64>,
+    pub ranking_score: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +72,7 @@ struct SearchCandidate {
     source_tags: Vec<String>,
     best_tag_rank: usize,
     median_like_score: f64,
+    ranking_score: f64,
 }
 
 fn push_slides(
@@ -80,6 +82,7 @@ fn push_slides(
     source_tags: &[String],
     best_tag_rank: Option<usize>,
     median_like_score: Option<f64>,
+    ranking_score: Option<f64>,
 ) {
     let urls: Vec<String> = if illust.page_count <= 1 {
         illust
@@ -113,6 +116,7 @@ fn push_slides(
             source_tags: source_tags.to_vec(),
             best_tag_rank,
             median_like_score,
+            ranking_score,
         });
     }
 }
@@ -157,9 +161,9 @@ pub async fn fetch_yesterday_slides(
             let date = dt.with_timezone(&Local).date_naive();
 
             if date == yesterday {
-                push_slides(&mut slides, illust, max_pages_per_post, &[], None, None);
+                push_slides(&mut slides, illust, max_pages_per_post, &[], None, None, None);
             } else if date >= today {
-                push_slides(&mut fallback, illust, max_pages_per_post, &[], None, None);
+                push_slides(&mut fallback, illust, max_pages_per_post, &[], None, None, None);
             } else {
                 reached_older = true;
                 break;
@@ -207,6 +211,7 @@ pub async fn fetch_tag_slides(
     let end = today;
     let max_results_per_tag = tag_cfg.max_results_per_tag.max(1);
     let max_search_pages = tag_cfg.max_search_pages_per_tag.max(1);
+    let recency_decay_lambda = valid_recency_decay_lambda(tag_cfg.recency_decay_lambda);
 
     let mut by_id: HashMap<u64, SearchCandidate> = HashMap::new();
     for tag in &tags {
@@ -267,7 +272,7 @@ pub async fn fetch_tag_slides(
             Err(err) => return Err(err),
         };
         candidates.retain(|candidate| candidate.illust.total_bookmarks >= tag_cfg.min_bookmarks);
-        assign_tag_metrics(tag, &mut candidates);
+        assign_tag_metrics(tag, &mut candidates, recency_decay_lambda);
 
         for candidate in candidates.drain(..) {
             by_id
@@ -281,6 +286,7 @@ pub async fn fetch_tag_slides(
                     existing.best_tag_rank = existing.best_tag_rank.min(candidate.best_tag_rank);
                     existing.median_like_score =
                         existing.median_like_score.max(candidate.median_like_score);
+                    existing.ranking_score = existing.ranking_score.max(candidate.ranking_score);
                 })
                 .or_insert(candidate);
         }
@@ -296,8 +302,8 @@ pub async fn fetch_tag_slides(
                 .then_with(|| b.illust.id.cmp(&a.illust.id))
         }),
         "median_like_ratio" => candidates.sort_by(|a, b| {
-            b.median_like_score
-                .partial_cmp(&a.median_like_score)
+            b.ranking_score
+                .partial_cmp(&a.ranking_score)
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| b.illust.total_bookmarks.cmp(&a.illust.total_bookmarks))
                 .then_with(|| b.illust.id.cmp(&a.illust.id))
@@ -318,6 +324,7 @@ pub async fn fetch_tag_slides(
             &candidate.source_tags,
             Some(candidate.best_tag_rank),
             Some(candidate.median_like_score),
+            Some(candidate.ranking_score),
         );
         if slides.len() >= tag_cfg.max_slides.max(1) {
             break;
@@ -363,6 +370,7 @@ async fn search_tag(
                 source_tags: Vec::new(),
                 best_tag_rank: usize::MAX,
                 median_like_score: 0.0,
+                ranking_score: 0.0,
             });
             if out.len() >= result_limit {
                 return Ok(out);
@@ -376,14 +384,41 @@ async fn search_tag(
     Ok(out)
 }
 
-fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate]) {
+fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate], recency_decay_lambda: f64) {
     let sample_median = sample_median_bookmarks(candidates);
     for (idx, candidate) in candidates.iter_mut().enumerate() {
         candidate.source_tags = vec![tag.to_string()];
         candidate.best_tag_rank = idx + 1;
         candidate.median_like_score =
             median_like_score(candidate.illust.total_bookmarks, sample_median);
+        candidate.ranking_score =
+            candidate.median_like_score * recency_decay(&candidate.illust, recency_decay_lambda);
     }
+}
+
+fn valid_recency_decay_lambda(raw: f64) -> f64 {
+    if raw.is_finite() && raw > 0.0 {
+        raw
+    } else {
+        0.0
+    }
+}
+
+fn recency_decay(illust: &Illust, lambda: f64) -> f64 {
+    if lambda <= 0.0 {
+        return 1.0;
+    }
+    let age_days = DateTime::parse_from_rfc3339(&illust.create_date)
+        .ok()
+        .map(|dt| {
+            Local::now()
+                .signed_duration_since(dt.with_timezone(&Local))
+                .num_seconds()
+                .max(0) as f64
+                / 86_400.0
+        })
+        .unwrap_or(0.0);
+    (-lambda * age_days).exp()
 }
 
 fn sample_median_bookmarks(candidates: &[SearchCandidate]) -> f64 {
