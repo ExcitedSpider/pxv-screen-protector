@@ -11,12 +11,17 @@ const decayText = (lambda?: number) => {
   return `${value.toFixed(3)} (${(Math.log(2) / value).toFixed(1)}d half-life)`;
 };
 
-const rows = [
+const shortcutRows = (help: HelpInfo | null) => [
   ["Left / Right", "previous / next slide"],
   ["Page Up / Down", "jump back / forward 10 slides"],
   ["Home / End", "first / last slide"],
   ["Space", "pause / resume"],
-  ["S", "save current illustration"],
+  [
+    "S",
+    help?.bookmark_on_save
+      ? "save current illustration and bookmark it"
+      : "save current illustration",
+  ],
   ["R", "reload current feed"],
   ["M", "switch feed mode"],
   ["?", "show / hide help"],
@@ -46,6 +51,9 @@ export function HelpOverlay({
   const tagTags = help?.tag_search.tags.length
     ? help.tag_search.tags.join(", ")
     : "not configured";
+  const bookmarkTags = help?.bookmark_tags.length
+    ? help.bookmark_tags.join(", ")
+    : "none";
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/[0.88] px-6 py-8 text-white backdrop-blur-md">
@@ -66,7 +74,7 @@ export function HelpOverlay({
               Shortcuts
             </h2>
             <dl className="rounded-lg bg-white/[0.06] p-4 ring-1 ring-white/10">
-              {rows.map(([key, action]) => (
+              {shortcutRows(help).map(([key, action]) => (
                 <div
                   key={key}
                   className="grid grid-cols-[104px_minmax(0,1fr)] gap-4 border-t border-white/10 py-2 first:border-t-0"
@@ -96,6 +104,15 @@ export function HelpOverlay({
                   label="Page cap"
                   value={`${help?.max_pages_per_post ?? 3} per post`}
                 />
+                <ConfigRow
+                  label="Bookmark on save"
+                  value={boolText(help?.bookmark_on_save)}
+                />
+                <ConfigRow
+                  label="Bookmark visibility"
+                  value={help?.bookmark_restrict ?? "private"}
+                />
+                <ConfigRow label="Bookmark tags" value={bookmarkTags} />
               </dl>
 
               <h3 className="mt-5 text-[14px] font-semibold text-white">

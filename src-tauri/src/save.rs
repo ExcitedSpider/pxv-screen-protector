@@ -26,7 +26,7 @@ pub fn resolve_dir(s: &str) -> PathBuf {
 /// `save_dir`. Returns a short human-readable status for the toast.
 pub async fn save(
     client: &reqwest::Client,
-    req: SaveRequest,
+    req: &SaveRequest,
     save_dir: &Path,
 ) -> Result<String, String> {
     std::fs::create_dir_all(save_dir)
@@ -80,5 +80,10 @@ fn sanitize(s: &str) -> String {
         })
         .collect();
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed.chars().take(120).collect::<String>().trim().to_string()
+    collapsed
+        .chars()
+        .take(120)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }

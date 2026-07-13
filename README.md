@@ -10,8 +10,8 @@ calls, image proxying, caching, saving, and system stats; React + Vite +
 TypeScript renders the slideshow UI.
 
 > Status: proof-of-concept desktop app for Linux / Fedora / KDE. It works end to
-> end, but there is still no in-app login, bookmarking, liking, or account
-> management.
+> end, but there is still no in-app login, liking, following management, or
+> account management.
 
 ## Features
 
@@ -29,7 +29,8 @@ TypeScript renders the slideshow UI.
     decay.
 - Status bar with artist/title, slide position, feed mode, tag metadata, rank or
   score where available, CPU, RAM, disk, network type, and local clock.
-- Saves the current illustration with `s`.
+- Saves the current illustration with `s`; optionally also adds a private Pixiv
+  bookmark.
 - Proxies Pixiv CDN images through Rust so the required `Referer` header is
   attached.
 - Size-capped on-disk image cache under `~/.cache/pixiv-slides/`.
@@ -130,6 +131,9 @@ feed_mode = "tag_search"
 slide_interval_secs = 300
 max_pages_per_post = 3
 save_dir = "~/Pictures/pixiv-slides"
+bookmark_on_save = true
+bookmark_restrict = "private"
+bookmark_tags = ["pixiv-slides"]
 cache_max_mb = 512
 
 [tag_feed]
@@ -181,7 +185,7 @@ cargo tauri build
 | `Page Up` / `Page Down` | jump back / forward 10 slides |
 | `Home` / `End` | first / last slide |
 | `Space` | pause / resume |
-| `S` | save the current illustration to `save_dir` |
+| `S` | save the current illustration to `save_dir`; optionally bookmark it |
 | `R` | reload the current feed |
 | `M` | switch between following feed and tag feed |
 | `?` | show / hide help |
@@ -200,6 +204,9 @@ slide_interval_secs = 300            # seconds between slides
 max_pages_per_post = 3               # cap pages shown per multi-page post
 empty_day_fallback = true            # following feed: use today if yesterday empty
 save_dir = "~/Pictures/pixiv-slides" # where `s` saves images
+bookmark_on_save = false             # if true, `s` also adds a Pixiv bookmark
+bookmark_restrict = "private"        # "private" or "public"
+bookmark_tags = []                   # optional Pixiv bookmark tags
 cache_max_mb = 512                   # 0 disables image caching
 ```
 
@@ -273,13 +280,17 @@ ignored by `.gitignore`.
 The only credentials in source are Pixiv's public mobile-app client constants,
 the same style used by pixivpy-based tools.
 
+When `bookmark_on_save = true`, pressing `s` writes the local file first, then
+adds a Pixiv bookmark through the app API. Bookmarks are private by default.
+
 ## Limitations
 
 - Linux desktop app only; tested on Fedora / KDE.
 - Requires a live graphical Wayland or X11 session. On SSH/headless runs, the
   app exits early with a clearer message instead of a GTK initialization panic.
 - No in-app login or token editor.
-- No bookmarking, liking, following management, or persistent browsing history.
+- No in-app bookmark browsing, unbookmarking, liking, following management, or
+  persistent browsing history.
 - Tag feed relies on Pixiv's unofficial app API and Pixiv's search behavior.
 - `popular_desc` usually requires Pixiv Premium. Non-Premium accounts can use
   `fallback_without_popular_sort = "local_bookmark_sort"`, but that only sorts

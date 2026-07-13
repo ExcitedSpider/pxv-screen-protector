@@ -22,6 +22,15 @@ pub struct Config {
     /// Folder to save illustrations into (supports a leading `~/`).
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
+    /// Also add a Pixiv bookmark when pressing `s`.
+    #[serde(default)]
+    pub bookmark_on_save: bool,
+    /// Pixiv bookmark visibility when `bookmark_on_save` is enabled.
+    #[serde(default = "default_bookmark_restrict")]
+    pub bookmark_restrict: String,
+    /// Optional Pixiv tags to attach to bookmarks created by this app.
+    #[serde(default)]
+    pub bookmark_tags: Vec<String>,
     /// On-disk image cache cap in MB (`0` disables caching).
     #[serde(default = "default_cache_mb")]
     pub cache_max_mb: u64,
@@ -99,6 +108,9 @@ fn default_true() -> bool {
 }
 fn default_save_dir() -> String {
     "~/Pictures/pixiv-slides".to_string()
+}
+fn default_bookmark_restrict() -> String {
+    "private".to_string()
 }
 fn default_cache_mb() -> u64 {
     512

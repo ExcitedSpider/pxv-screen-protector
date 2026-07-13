@@ -1,4 +1,5 @@
 mod auth;
+mod bookmark;
 mod cache;
 mod config;
 mod image;
@@ -26,6 +27,9 @@ pub struct HelpInfo {
     configured_feed_mode: String,
     slide_interval_secs: u64,
     max_pages_per_post: usize,
+    bookmark_on_save: bool,
+    bookmark_restrict: String,
+    bookmark_tags: Vec<String>,
     following_daily: FollowingDailyHelp,
     tag_search: TagSearchHelp,
 }
@@ -117,6 +121,9 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
             configured_feed_mode,
             slide_interval_secs: cfg.slide_interval_secs,
             max_pages_per_post: cfg.max_pages_per_post,
+            bookmark_on_save: cfg.bookmark_on_save,
+            bookmark_restrict: cfg.bookmark_restrict,
+            bookmark_tags: cfg.bookmark_tags,
             following_daily: FollowingDailyHelp {
                 day: yesterday,
                 empty_day_fallback: cfg.empty_day_fallback,
@@ -144,7 +151,8 @@ fn system_stats() -> system::SystemStats {
     system::collect()
 }
 
-/// Save the currently-viewed illustration to the configured folder.
+/// Save the currently-viewed illustration to the configured folder, and
+/// optionally add a Pixiv bookmark when configured.
 #[tauri::command]
 async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
     let cfg = config::load()?;
@@ -152,7 +160,28 @@ async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| format!("http client build failed: {e}"))?;
-    save::save(&client, slide, &dir).await
+    let save_status = save::save(&client, &slide, &dir).await?;
+
+    if !cfg.bookmark_on_save {
+        return Ok(save_status);
+    }
+
+    let token = match auth::refresh(&client, &cfg.refresh_token).await {
+        Ok(token) => token,
+        Err(err) => return Ok(format!("{save_status} · Bookmark failed: {err}")),
+    };
+    match bookmark::add(
+        &client,
+        &token.access_token,
+        slide.illust_id,
+        &cfg.bookmark_restrict,
+        &cfg.bookmark_tags,
+    )
+    .await
+    {
+        Ok(bookmark_status) => Ok(format!("{save_status} · {bookmark_status}")),
+        Err(err) => Ok(format!("{save_status} · Bookmark failed: {err}")),
+    }
 }
 
 /// Exit cleanly (bound to Escape in the frontend).
