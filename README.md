@@ -10,7 +10,7 @@ calls, image proxying, caching, saving, and system stats; React + Vite +
 TypeScript renders the slideshow UI.
 
 > Status: proof-of-concept desktop app for Linux / Fedora / KDE. It works end to
-> end, but there is still no in-app login, liking, following management, or
+> end, but there is still no in-app login or general bookmark, follow, or
 > account management.
 
 ## Features
@@ -29,8 +29,8 @@ TypeScript renders the slideshow UI.
     decay.
 - Status bar with artist/title, slide position, feed mode, tag metadata, rank or
   score where available, CPU, RAM, disk, network type, and local clock.
-- Saves the current illustration with `s`; optionally also adds a private Pixiv
-  bookmark.
+- Saves the current illustration with `s`; optionally also adds a Pixiv
+  bookmark and, in tag mode, publicly follows its author.
 - Proxies Pixiv CDN images through Rust so the required `Referer` header is
   attached.
 - Size-capped on-disk image cache under `~/.cache/pixiv-slides/`.
@@ -49,6 +49,8 @@ timezone, and optionally falls back to today so far when yesterday is empty.
 `/v1/search/illust`, bounded by `max_results_per_tag` and
 `max_search_pages_per_tag`. Results are deduplicated by illustration id, sorted
 by `merge_strategy`, expanded into slides, then capped by `max_slides`.
+When both `bookmark_on_save` and `follow_when_bookmark` are enabled, a successful
+tag-feed save and bookmark also publicly follows the work's author.
 
 **Images:** Pixiv's CDN rejects normal webview image loads without a Pixiv
 `Referer`. The frontend therefore renders `pximg://...` URLs; Rust handles that
@@ -138,6 +140,7 @@ cache_max_mb = 512
 
 [tag_feed]
 tags = ["landscape", "original"]
+follow_when_bookmark = true
 range_days = 30
 search_target = "exact_match_for_tags"
 sort = "popular_desc"
@@ -185,7 +188,7 @@ cargo tauri build
 | `Page Up` / `Page Down` | jump back / forward 10 slides |
 | `Home` / `End` | first / last slide |
 | `Space` | pause / resume |
-| `S` | save the current illustration to `save_dir`; optionally bookmark it |
+| `S` | save the current illustration; optionally bookmark it and, in tag mode, follow its author |
 | `R` | reload the current feed |
 | `M` | switch between following feed and tag feed |
 | `?` | show / hide help |
@@ -215,6 +218,7 @@ Tag feed config:
 ```toml
 [tag_feed]
 tags = ["landscape", "original"]     # searched independently, then merged
+follow_when_bookmark = false         # publicly follow after a successful tag-feed bookmark
 range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"
 sort = "popular_desc"                # Pixiv Premium popularity sort
@@ -283,14 +287,22 @@ the same style used by pixivpy-based tools.
 When `bookmark_on_save = true`, pressing `s` writes the local file first, then
 adds a Pixiv bookmark through the app API. Bookmarks are private by default.
 
+When `[tag_feed].follow_when_bookmark = true` as well, a successful bookmark
+made from the active tag feed is followed by a public follow of the work's
+author. Following is skipped in following-feed mode and when saving or
+bookmarking fails. These automatic follows use public visibility and may be
+visible to other Pixiv users.
+
 ## Limitations
 
 - Linux desktop app only; tested on Fedora / KDE.
 - Requires a live graphical Wayland or X11 session. On SSH/headless runs, the
   app exits early with a clearer message instead of a GTK initialization panic.
 - No in-app login or token editor.
-- No in-app bookmark browsing, unbookmarking, liking, following management, or
-  persistent browsing history.
+- No in-app bookmark browsing, unbookmarking, liking, unfollowing, follow
+  visibility controls, or persistent browsing history.
+- Automatic following is public-only and is available only through the
+  tag-feed save-and-bookmark flow.
 - Tag feed relies on Pixiv's unofficial app API and Pixiv's search behavior.
 - `popular_desc` usually requires Pixiv Premium. Non-Premium accounts can use
   `fallback_without_popular_sort = "local_bookmark_sort"`, but that only sorts

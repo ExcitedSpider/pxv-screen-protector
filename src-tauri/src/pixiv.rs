@@ -30,7 +30,10 @@ struct Illust {
 
 #[derive(Debug, Deserialize, Clone)]
 struct User {
+    id: u64,
     name: String,
+    #[serde(default)]
+    is_followed: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -56,6 +59,8 @@ pub struct Slide {
     pub illust_id: u64,
     pub title: String,
     pub artist: String,
+    pub user_id: u64,
+    pub is_followed: Option<bool>,
     pub image_url: String,
     pub page: u32,
     pub page_count: u32,
@@ -109,6 +114,8 @@ fn push_slides(
             illust_id: illust.id,
             title: illust.title.clone(),
             artist: illust.user.name.clone(),
+            user_id: illust.user.id,
+            is_followed: illust.user.is_followed,
             image_url: url,
             page: i as u32 + 1,
             page_count: illust.page_count,
@@ -482,4 +489,51 @@ async fn get_search_page(
     }
     serde_json::from_str(&body)
         .map_err(|e| format!("tag search parse failed for {tag:?}: {e}; body={body}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{push_slides, Illust};
+
+    fn test_illust(user_extra: &str) -> Illust {
+        serde_json::from_str(&format!(
+            r#"{{
+                "id": 42,
+                "title": "Test work",
+                "create_date": "2026-07-15T12:00:00+10:00",
+                "page_count": 1,
+                "user": {{
+                    "id": 99,
+                    "name": "Test artist"
+                    {user_extra}
+                }},
+                "meta_single_page": {{
+                    "original_image_url": "https://i.pximg.net/img-original/test.jpg"
+                }}
+            }}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn slide_keeps_author_identity_and_follow_state() {
+        let illust = test_illust(", \"is_followed\": true");
+        let mut slides = Vec::new();
+
+        push_slides(&mut slides, &illust, 1, &[], None, None, None);
+
+        assert_eq!(slides.len(), 1);
+        assert_eq!(slides[0].user_id, 99);
+        assert_eq!(slides[0].is_followed, Some(true));
+    }
+
+    #[test]
+    fn missing_follow_state_is_preserved_as_unknown() {
+        let illust = test_illust("");
+        let mut slides = Vec::new();
+
+        push_slides(&mut slides, &illust, 1, &[], None, None, None);
+
+        assert_eq!(slides[0].is_followed, None);
+    }
 }

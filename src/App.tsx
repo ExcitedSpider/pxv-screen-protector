@@ -43,6 +43,7 @@ export default function App() {
   // Latest slide, reachable from the (stable) keyboard handler.
   const currentRef = useRef<Slide | undefined>(undefined);
   const feedModeRef = useRef<FeedMode | null>(null);
+  const saveInFlight = useRef(false);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -175,11 +176,16 @@ export default function App() {
         case "s":
         case "S": {
           const slide = currentRef.current;
-          if (!slide) break;
+          const mode = feedModeRef.current;
+          if (!slide || !mode || saveInFlight.current) break;
+          saveInFlight.current = true;
           showToast("Saving…");
-          saveIllustration(slide)
+          saveIllustration(slide, mode)
             .then(showToast)
-            .catch((err) => showToast("Save failed: " + String(err)));
+            .catch((err) => showToast("Save failed: " + String(err)))
+            .finally(() => {
+              saveInFlight.current = false;
+            });
           break;
         }
         case "Escape":

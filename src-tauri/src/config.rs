@@ -41,6 +41,9 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TagFeedConfig {
+    /// After a tag-feed save is bookmarked, publicly follow its author.
+    #[serde(default)]
+    pub follow_when_bookmark: bool,
     /// Tags to search independently, then merge by popularity.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -79,6 +82,7 @@ pub struct TagFeedConfig {
 impl Default for TagFeedConfig {
     fn default() -> Self {
         Self {
+            follow_when_bookmark: false,
             tags: Vec::new(),
             range_days: default_tag_range_days(),
             search_target: default_search_target(),
@@ -166,4 +170,25 @@ pub fn load() -> Result<Config, String> {
         )
     })?;
     toml::from_str(&text).map_err(|e| format!("Invalid config {}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn follow_when_bookmark_defaults_to_false() {
+        let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
+
+        assert!(!config.tag_feed.follow_when_bookmark);
+    }
+
+    #[test]
+    fn follow_when_bookmark_can_be_enabled_for_tag_feed() {
+        let config: Config =
+            toml::from_str("refresh_token = \"token\"\n\n[tag_feed]\nfollow_when_bookmark = true")
+                .unwrap();
+
+        assert!(config.tag_feed.follow_when_bookmark);
+    }
 }

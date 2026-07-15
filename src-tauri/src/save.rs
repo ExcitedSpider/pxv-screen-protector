@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 #[derive(Deserialize)]
 pub struct SaveRequest {
     pub illust_id: u64,
+    pub user_id: u64,
+    #[serde(default)]
+    pub is_followed: Option<bool>,
+    pub feed_mode: String,
     pub artist: String,
     pub title: String,
     pub image_url: String,

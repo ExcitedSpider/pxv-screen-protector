@@ -11,16 +11,20 @@ const decayText = (lambda?: number) => {
   return `${value.toFixed(3)} (${(Math.log(2) / value).toFixed(1)}d half-life)`;
 };
 
-const shortcutRows = (help: HelpInfo | null) => [
+const shortcutRows = (help: HelpInfo | null, activeMode: FeedMode | null) => [
   ["Left / Right", "previous / next slide"],
   ["Page Up / Down", "jump back / forward 10 slides"],
   ["Home / End", "first / last slide"],
   ["Space", "pause / resume"],
   [
     "S",
-    help?.bookmark_on_save
-      ? "save current illustration and bookmark it"
-      : "save current illustration",
+    help?.bookmark_on_save &&
+    help.tag_search.follow_when_bookmark &&
+    activeMode === "tag_search"
+      ? "save, bookmark, and follow the author"
+      : help?.bookmark_on_save
+        ? "save current illustration and bookmark it"
+        : "save current illustration",
   ],
   ["R", "reload current feed"],
   ["M", "switch feed mode"],
@@ -74,7 +78,7 @@ export function HelpOverlay({
               Shortcuts
             </h2>
             <dl className="rounded-lg bg-white/[0.06] p-4 ring-1 ring-white/10">
-              {shortcutRows(help).map(([key, action]) => (
+              {shortcutRows(help, activeMode).map(([key, action]) => (
                 <div
                   key={key}
                   className="grid grid-cols-[104px_minmax(0,1fr)] gap-4 border-t border-white/10 py-2 first:border-t-0"
@@ -134,6 +138,10 @@ export function HelpOverlay({
               </h3>
               <dl className="mt-2">
                 <ConfigRow label="Tags" value={tagTags} />
+                <ConfigRow
+                  label="Public follow on bookmark"
+                  value={boolText(help?.tag_search.follow_when_bookmark)}
+                />
                 <ConfigRow
                   label="Range"
                   value={`${help?.tag_search.range_days ?? 30} days`}

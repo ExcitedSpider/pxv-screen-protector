@@ -4,6 +4,8 @@ export type FeedMode = "following_daily" | "tag_search";
 
 export interface Slide {
   illust_id: number;
+  user_id: number;
+  is_followed?: boolean | null;
   title: string;
   artist: string;
   image_url: string;
@@ -14,6 +16,10 @@ export interface Slide {
   best_tag_rank: number | null;
   median_like_score: number | null;
   ranking_score: number | null;
+}
+
+export interface SaveRequest extends Slide {
+  feed_mode: FeedMode;
 }
 
 export interface SlideShow {
@@ -43,6 +49,7 @@ export interface FollowingDailyHelp {
 
 export interface TagSearchHelp {
   tags: string[];
+  follow_when_bookmark: boolean;
   range_days: number;
   search_target: string;
   sort: string;
@@ -70,8 +77,10 @@ export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 
 /** Save the given illustration to the configured folder; returns a status string. */
-export const saveIllustration = (slide: Slide) =>
-  invoke<string>("save_illustration", { slide });
+export const saveIllustration = (slide: Slide, mode: FeedMode) =>
+  invoke<string>("save_illustration", {
+    slide: { ...slide, feed_mode: mode } satisfies SaveRequest,
+  });
 
 /** Wrap a raw i.pximg.net URL in the custom protocol that adds the Referer. */
 export const pximg = (url: string) =>

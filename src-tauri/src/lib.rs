@@ -2,12 +2,33 @@ mod auth;
 mod bookmark;
 mod cache;
 mod config;
+mod follow;
 mod image;
 mod pixiv;
 mod save;
 mod system;
 
 use serde::Serialize;
+use std::{collections::HashSet, sync::Mutex};
+
+#[derive(Default)]
+struct FollowedAuthors(Mutex<HashSet<u64>>);
+
+impl FollowedAuthors {
+    fn contains(&self, user_id: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&user_id)
+    }
+
+    fn remember(&self, user_id: u64) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(user_id);
+    }
+}
 
 #[derive(Serialize)]
 pub struct SlideShow {
@@ -42,6 +63,7 @@ pub struct FollowingDailyHelp {
 
 #[derive(Serialize)]
 pub struct TagSearchHelp {
+    follow_when_bookmark: bool,
     tags: Vec<String>,
     range_days: i64,
     search_target: String,
@@ -129,6 +151,7 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
                 empty_day_fallback: cfg.empty_day_fallback,
             },
             tag_search: TagSearchHelp {
+                follow_when_bookmark: cfg.tag_feed.follow_when_bookmark,
                 tags: cfg.tag_feed.tags,
                 range_days: cfg.tag_feed.range_days.clamp(1, 366),
                 search_target: cfg.tag_feed.search_target,
@@ -152,9 +175,12 @@ fn system_stats() -> system::SystemStats {
 }
 
 /// Save the currently-viewed illustration to the configured folder, and
-/// optionally add a Pixiv bookmark when configured.
+/// optionally add a Pixiv bookmark and follow its author when configured.
 #[tauri::command]
-async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
+async fn save_illustration(
+    slide: save::SaveRequest,
+    followed_authors: tauri::State<'_, FollowedAuthors>,
+) -> Result<String, String> {
     let cfg = config::load()?;
     let dir = save::resolve_dir(&cfg.save_dir);
     let client = reqwest::Client::builder()
@@ -170,7 +196,7 @@ async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
         Ok(token) => token,
         Err(err) => return Ok(format!("{save_status} · Bookmark failed: {err}")),
     };
-    match bookmark::add(
+    let bookmark_status = match bookmark::add(
         &client,
         &token.access_token,
         slide.illust_id,
@@ -179,9 +205,41 @@ async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
     )
     .await
     {
-        Ok(bookmark_status) => Ok(format!("{save_status} · {bookmark_status}")),
-        Err(err) => Ok(format!("{save_status} · Bookmark failed: {err}")),
+        Ok(bookmark_status) => bookmark_status,
+        Err(err) => return Ok(format!("{save_status} · Bookmark failed: {err}")),
+    };
+    let status = format!("{save_status} · {bookmark_status}");
+
+    let already_followed = slide.is_followed == Some(true)
+        || followed_authors.contains(slide.user_id);
+    if !should_follow_author(
+        &slide.feed_mode,
+        cfg.bookmark_on_save,
+        cfg.tag_feed.follow_when_bookmark,
+        already_followed,
+    ) {
+        return Ok(status);
     }
+
+    match follow::add(&client, &token.access_token, slide.user_id).await {
+        Ok(follow_status) => {
+            followed_authors.remember(slide.user_id);
+            Ok(format!("{status} · {follow_status}"))
+        }
+        Err(err) => Ok(format!("{status} · Follow failed: {err}")),
+    }
+}
+
+fn should_follow_author(
+    feed_mode: &str,
+    bookmark_on_save: bool,
+    follow_when_bookmark: bool,
+    already_followed: bool,
+) -> bool {
+    bookmark_on_save
+        && follow_when_bookmark
+        && feed_mode.trim() == "tag_search"
+        && !already_followed
 }
 
 /// Exit cleanly (bound to Escape in the frontend).
@@ -259,6 +317,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .manage(FollowedAuthors::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -297,4 +356,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_follow_author, FollowedAuthors};
+
+    #[test]
+    fn follows_only_unfollowed_tag_feed_authors_after_bookmarking() {
+        assert!(should_follow_author("tag_search", true, true, false));
+        assert!(!should_follow_author("following_daily", true, true, false));
+        assert!(!should_follow_author("tag_search", false, true, false));
+        assert!(!should_follow_author("tag_search", true, false, false));
+        assert!(!should_follow_author("tag_search", true, true, true));
+    }
+
+    #[test]
+    fn remembers_successfully_followed_authors_for_the_session() {
+        let followed_authors = FollowedAuthors::default();
+
+        assert!(!followed_authors.contains(42));
+        followed_authors.remember(42);
+        assert!(followed_authors.contains(42));
+        assert!(!should_follow_author(
+            "tag_search",
+            true,
+            true,
+            followed_authors.contains(42),
+        ));
+    }
 }
