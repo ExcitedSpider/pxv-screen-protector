@@ -111,6 +111,48 @@ struct SearchCandidate {
     ranking_score: f64,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SearchFilterCounts {
+    nsfw: usize,
+    excluded_tag: usize,
+}
+
+fn normalize_tags(raw: &[String]) -> Vec<String> {
+    let mut normalized: Vec<String> = Vec::new();
+    for raw_tag in raw {
+        let tag = raw_tag.trim();
+        if !tag.is_empty() && !normalized.iter().any(|existing| existing == tag) {
+            normalized.push(tag.to_string());
+        }
+    }
+    normalized
+}
+
+fn normalize_tag_filters(
+    raw_tags: &[String],
+    raw_exclude_tags: &[String],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let tags = normalize_tags(raw_tags);
+    let exclude_tags = normalize_tags(raw_exclude_tags);
+    if tags.is_empty() {
+        return Err("feed_mode=tag_search requires at least one [tag_feed].tags entry".to_string());
+    }
+    if let Some(overlap) = tags.iter().find(|tag| exclude_tags.contains(tag)) {
+        return Err(format!(
+            "tag_feed tag {overlap:?} cannot appear in both tags and exclude_tags"
+        ));
+    }
+    Ok((tags, exclude_tags))
+}
+
+fn should_filter_excluded_tag(illust: &Illust, exclude_tags: &[String]) -> bool {
+    illust.tags.iter().any(|illust_tag| {
+        exclude_tags
+            .iter()
+            .any(|excluded| excluded == &illust_tag.name)
+    })
+}
+
 fn should_filter_nsfw(illust: &Illust, avoid_nsfw: bool) -> bool {
     avoid_nsfw && illust.x_restrict != Some(0)
 }
@@ -341,17 +383,7 @@ pub async fn fetch_tag_slides(
     max_pages_per_post: usize,
     avoid_nsfw: bool,
 ) -> Result<Vec<Slide>, String> {
-    let tags: Vec<String> = tag_cfg
-        .tags
-        .iter()
-        .map(|tag| tag.trim())
-        .filter(|tag| !tag.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-
-    if tags.is_empty() {
-        return Err("feed_mode=tag_search requires at least one [tag_feed].tags entry".to_string());
-    }
+    let (tags, exclude_tags) = normalize_tag_filters(&tag_cfg.tags, &tag_cfg.exclude_tags)?;
 
     let range_days = tag_cfg.range_days.clamp(1, 366);
     let today = Local::now().date_naive();
@@ -374,6 +406,7 @@ pub async fn fetch_tag_slides(
             max_results_per_tag,
             max_search_pages,
             avoid_nsfw,
+            &exclude_tags,
         )
         .await
         {
@@ -392,6 +425,7 @@ pub async fn fetch_tag_slides(
                             usize::MAX,
                             max_search_pages,
                             avoid_nsfw,
+                            &exclude_tags,
                         )
                         .await?;
                         local.sort_by(|a, b| {
@@ -494,6 +528,7 @@ async fn search_tag(
     result_limit: usize,
     page_limit: usize,
     avoid_nsfw: bool,
+    exclude_tags: &[String],
 ) -> Result<Vec<SearchCandidate>, String> {
     let start_s = start.to_string();
     let end_s = end.to_string();
@@ -514,15 +549,30 @@ async fn search_tag(
     let mut out = Vec::new();
     for page in 1..=page_limit {
         let resp = get_search_page(client, access_token, &url, tag, sort, page).await?;
-        let filtered_nsfw =
-            append_search_candidates(&mut out, resp.illusts, result_limit, avoid_nsfw);
-        if filtered_nsfw > 0 {
+        let filtered = append_search_candidates(
+            &mut out,
+            resp.illusts,
+            result_limit,
+            avoid_nsfw,
+            exclude_tags,
+        );
+        if filtered.nsfw > 0 {
             log::info!(
                 "event=nsfw_filter feed_mode=tag_search tag={:?} sort={:?} page={} filtered={} policy=explicit_general_only",
                 tag,
                 sort,
                 page,
-                filtered_nsfw
+                filtered.nsfw
+            );
+        }
+        if filtered.excluded_tag > 0 {
+            log::info!(
+                "event=tag_exclusion_filter feed_mode=tag_search tag={:?} sort={:?} page={} filtered={} configured_exclusions={}",
+                tag,
+                sort,
+                page,
+                filtered.excluded_tag,
+                exclude_tags.len()
             );
         }
         if out.len() >= result_limit {
@@ -541,14 +591,19 @@ fn append_search_candidates(
     illusts: Vec<Illust>,
     result_limit: usize,
     avoid_nsfw: bool,
-) -> usize {
+    exclude_tags: &[String],
+) -> SearchFilterCounts {
     if out.len() >= result_limit {
-        return 0;
+        return SearchFilterCounts::default();
     }
-    let mut filtered_nsfw = 0usize;
+    let mut filtered = SearchFilterCounts::default();
     for illust in illusts {
         if should_filter_nsfw(&illust, avoid_nsfw) {
-            filtered_nsfw += 1;
+            filtered.nsfw += 1;
+            continue;
+        }
+        if should_filter_excluded_tag(&illust, exclude_tags) {
+            filtered.excluded_tag += 1;
             continue;
         }
         out.push(SearchCandidate {
@@ -562,7 +617,7 @@ fn append_search_candidates(
             break;
         }
     }
-    filtered_nsfw
+    filtered
 }
 
 fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate], recency_decay_lambda: f64) {
@@ -742,7 +797,10 @@ fn url_host(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_search_candidates, push_slides, should_filter_nsfw, Illust};
+    use super::{
+        append_search_candidates, normalize_tag_filters, push_slides, should_filter_excluded_tag,
+        should_filter_nsfw, Illust,
+    };
 
     fn test_illust(user_extra: &str, illust_extra: &str) -> Illust {
         serde_json::from_str(&format!(
@@ -906,10 +964,99 @@ mod tests {
         let mut candidates = Vec::new();
 
         let filtered =
-            append_search_candidates(&mut candidates, vec![restricted, general], 1, true);
+            append_search_candidates(&mut candidates, vec![restricted, general], 1, true, &[]);
 
-        assert_eq!(filtered, 1);
+        assert_eq!(filtered.nsfw, 1);
+        assert_eq!(filtered.excluded_tag, 0);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].illust.x_restrict, Some(0));
+    }
+
+    #[test]
+    fn tag_filters_are_trimmed_deduplicated_and_must_not_overlap() {
+        let (tags, exclude_tags) = normalize_tag_filters(
+            &[
+                " landscape ".to_string(),
+                String::new(),
+                "original".to_string(),
+                "landscape".to_string(),
+            ],
+            &[
+                " AI生成 ".to_string(),
+                "R-18".to_string(),
+                "AI生成".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(tags, ["landscape", "original"]);
+        assert_eq!(exclude_tags, ["AI生成", "R-18"]);
+
+        let err = normalize_tag_filters(&["landscape".to_string()], &[" landscape ".to_string()])
+            .unwrap_err();
+        assert!(err.contains("both tags and exclude_tags"));
+    }
+
+    #[test]
+    fn excluded_tag_matching_uses_canonical_exact_names_only() {
+        let illust = test_illust(
+            "",
+            r#", "tags": [
+                {"name": "AI生成", "translated_name": "AI-generated"},
+                {"name": "風景"}
+            ]"#,
+        );
+
+        assert!(should_filter_excluded_tag(&illust, &["AI生成".to_string()]));
+        assert!(!should_filter_excluded_tag(&illust, &["AI".to_string()]));
+        assert!(!should_filter_excluded_tag(
+            &illust,
+            &["AI-generated".to_string()]
+        ));
+        assert!(!should_filter_excluded_tag(&illust, &[]));
+    }
+
+    #[test]
+    fn excluded_search_results_do_not_consume_the_accepted_result_limit() {
+        let excluded = test_illust(
+            "",
+            r#", "tags": [{"name": "AI生成", "translated_name": "AI-generated"}]"#,
+        );
+        let allowed = test_illust("", r#", "tags": [{"name": "風景"}]"#);
+        let mut candidates = Vec::new();
+
+        let filtered = append_search_candidates(
+            &mut candidates,
+            vec![excluded, allowed],
+            1,
+            false,
+            &["AI生成".to_string()],
+        );
+
+        assert_eq!(filtered.nsfw, 0);
+        assert_eq!(filtered.excluded_tag, 1);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].illust.tags[0].name, "風景");
+    }
+
+    #[test]
+    fn nsfw_and_excluded_tag_filters_work_together() {
+        let restricted = test_illust("", ", \"x_restrict\": 1");
+        let excluded = test_illust("", r#", "tags": [{"name": "AI生成"}], "x_restrict": 0"#);
+        let allowed = test_illust("", ", \"x_restrict\": 0");
+        let mut candidates = Vec::new();
+
+        let filtered = append_search_candidates(
+            &mut candidates,
+            vec![restricted, excluded, allowed],
+            1,
+            true,
+            &["AI生成".to_string()],
+        );
+
+        assert_eq!(filtered.nsfw, 1);
+        assert_eq!(filtered.excluded_tag, 1);
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].illust.tags.is_empty());
     }
 }

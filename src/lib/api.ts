@@ -74,6 +74,7 @@ export interface FollowingDailyHelp {
 
 export interface TagSearchHelp {
   tags: string[];
+  exclude_tags: string[];
   follow_when_bookmark: boolean;
   range_days: number;
   search_target: string;

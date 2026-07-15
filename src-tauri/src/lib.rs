@@ -170,6 +170,7 @@ pub struct FollowingDailyHelp {
 pub struct TagSearchHelp {
     follow_when_bookmark: bool,
     tags: Vec<String>,
+    exclude_tags: Vec<String>,
     range_days: i64,
     search_target: String,
     sort: String,
@@ -295,6 +296,7 @@ async fn load_slideshow(
             tag_search: TagSearchHelp {
                 follow_when_bookmark: cfg.tag_feed.follow_when_bookmark,
                 tags: cfg.tag_feed.tags,
+                exclude_tags: cfg.tag_feed.exclude_tags,
                 range_days: cfg.tag_feed.range_days.clamp(1, 366),
                 search_target: cfg.tag_feed.search_target,
                 sort: cfg.tag_feed.sort,

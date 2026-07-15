@@ -157,6 +157,7 @@ cache_max_mb = 512
 
 [tag_feed]
 tags = ["landscape", "original"]
+exclude_tags = ["AI生成", "R-18"]
 follow_when_bookmark = true
 range_days = 30
 search_target = "exact_match_for_tags"
@@ -360,6 +361,7 @@ Tag feed config:
 ```toml
 [tag_feed]
 tags = ["landscape", "original"]     # searched independently, then merged
+exclude_tags = []                     # discard works carrying any exact tag match
 follow_when_bookmark = false         # publicly follow after a successful tag-feed bookmark
 range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"
@@ -410,16 +412,21 @@ max_results_per_tag = 30
 max_slides = 120
 ```
 
-the app keeps up to 150 tag-results across the five per-tag samples. With
-`avoid_nsfw` enabled, filtered works do not consume a per-tag result cap, so the
-app can scan additional results up to `max_search_pages_per_tag`. It then
-filters out anything below `min_bookmarks`, deduplicates the survivors, sorts
-them, expands multi-page posts up to `max_pages_per_post`, and stops at 120
-slides. Because `max_slides` counts slides, not illustrations, multi-page posts
-can reduce the number of distinct works shown.
+the app keeps up to 150 tag-results across the five per-tag samples. Tag
+exclusion uses fetch-then-discard filtering: the Pixiv search request is
+unchanged, and the app discards a work locally when a returned tag name exactly
+matches an entry in `exclude_tags`. A tag cannot appear in both `tags` and
+`exclude_tags`; that is reported as invalid configuration. Excluded works, like
+works filtered by `avoid_nsfw`, do not consume a per-tag result cap, so the app
+can scan additional results up to `max_search_pages_per_tag`. It then filters out
+anything below `min_bookmarks`, deduplicates the survivors, sorts them, expands
+multi-page posts up to `max_pages_per_post`, and stops at 120 slides. Because
+`max_slides` counts slides, not illustrations, multi-page posts can reduce the
+number of distinct works shown.
 
-Configuration is read each time the feed loads. After changing `avoid_nsfw`,
-press `r` to reload the active feed; restarting the app is not required.
+Configuration is read each time the feed loads. After changing `avoid_nsfw` or
+`exclude_tags`, press `r` to reload the active feed; restarting the app is not
+required.
 
 ## Privacy
 

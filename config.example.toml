@@ -17,6 +17,7 @@ cache_max_mb = 512                   # on-disk image cache cap in MB (0 disables
 # Used only when feed_mode = "tag_search".
 [tag_feed]
 tags = ["landscape", "original"]     # searched independently, then merged
+exclude_tags = []                     # discard works carrying any exact tag match
 follow_when_bookmark = false         # after a successful `s` bookmark, publicly follow its author
 range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"

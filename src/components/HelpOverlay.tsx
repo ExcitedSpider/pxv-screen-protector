@@ -58,6 +58,9 @@ export function HelpOverlay({
   const tagTags = help?.tag_search.tags.length
     ? help.tag_search.tags.join(", ")
     : "not configured";
+  const excludedTags = help?.tag_search.exclude_tags?.length
+    ? help.tag_search.exclude_tags.join(", ")
+    : "none";
   const bookmarkTags = help?.bookmark_tags.length
     ? help.bookmark_tags.join(", ")
     : "none";
@@ -150,6 +153,7 @@ export function HelpOverlay({
               </h3>
               <dl className="mt-2">
                 <ConfigRow label="Tags" value={tagTags} />
+                <ConfigRow label="Excluded tags" value={excludedTags} />
                 <ConfigRow
                   label="Public follow on bookmark"
                   value={boolText(help?.tag_search.follow_when_bookmark)}

@@ -50,6 +50,9 @@ pub struct TagFeedConfig {
     /// Tags to search independently, then merge by popularity.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Discard search results containing any of these Pixiv tags.
+    #[serde(default)]
+    pub exclude_tags: Vec<String>,
     /// Search range in local days, inclusive of today.
     #[serde(default = "default_tag_range_days")]
     pub range_days: i64,
@@ -87,6 +90,7 @@ impl Default for TagFeedConfig {
         Self {
             follow_when_bookmark: false,
             tags: Vec::new(),
+            exclude_tags: Vec::new(),
             range_days: default_tag_range_days(),
             search_target: default_search_target(),
             sort: default_search_sort(),
@@ -184,6 +188,23 @@ mod tests {
         let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
 
         assert!(!config.tag_feed.follow_when_bookmark);
+    }
+
+    #[test]
+    fn exclude_tags_defaults_to_empty() {
+        let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
+
+        assert!(config.tag_feed.exclude_tags.is_empty());
+    }
+
+    #[test]
+    fn exclude_tags_can_be_configured_for_tag_feed() {
+        let config: Config = toml::from_str(
+            "refresh_token = \"token\"\n\n[tag_feed]\nexclude_tags = [\"AI生成\", \"R-18\"]",
+        )
+        .unwrap();
+
+        assert_eq!(config.tag_feed.exclude_tags, ["AI生成", "R-18"]);
     }
 
     #[test]
