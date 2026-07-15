@@ -234,31 +234,73 @@ find_one_bundle() {
   printf '%s\n' "${matches[0]}"
 }
 
+deb_listing_has_path() {
+  local contents=$1
+  local expected=$2
+  local entry
+  while IFS= read -r entry; do
+    entry=${entry##* }
+    if [[ "$entry" == "$expected" || "$entry" == "./$expected" ]]; then
+      return 0
+    fi
+  done <<<"$contents"
+  return 1
+}
+
+validate_metainfo_source() {
+  local expected
+  local metainfo_file="src-tauri/linux/$app_identifier.metainfo.xml"
+
+  [[ -r "$metainfo_file" ]] || die "AppStream metadata is missing: $metainfo_file"
+  for expected in \
+    "<id>$app_identifier</id>" \
+    "<project_license>MIT</project_license>" \
+    "<name>$product_name</name>" \
+    "<name translate=\"no\">$publisher</name>" \
+    "<launchable type=\"desktop-id\">$product_name.desktop</launchable>" \
+    "<binary>$main_binary_name</binary>" \
+    "<url type=\"homepage\">$project_homepage</url>"; do
+    grep -F "$expected" "$metainfo_file" >/dev/null || \
+      die "AppStream metadata is missing expected value: $expected"
+  done
+}
+
 copy_and_validate_deb() {
   local contents
-  local entry
-  local license_found=false
+  local expected
+  local homepage
   local license_path="usr/lib/$product_name/LICENSE"
+  local maintainer
   local source_file
   local output_file
   source_file=$(find_one_bundle deb deb)
   output_file="$OUTPUT_DIR/$(basename "$source_file")"
   cp -- "$source_file" "$output_file"
   dpkg-deb --info "$output_file" >/dev/null
+  maintainer=$(dpkg-deb --field "$output_file" Maintainer)
+  [[ "$maintainer" == "$publisher" ]] || \
+    die "Debian package maintainer is '$maintainer', expected '$publisher'"
+  homepage=$(dpkg-deb --field "$output_file" Homepage)
+  [[ "$homepage" == "$project_homepage" ]] || \
+    die "Debian package homepage is '$homepage', expected '$project_homepage'"
   contents=$(dpkg-deb --contents "$output_file")
-  while IFS= read -r entry; do
-    entry=${entry##* }
-    if [[ "$entry" == "$license_path" || "$entry" == "./$license_path" ]]; then
-      license_found=true
-      break
-    fi
-  done <<<"$contents"
-  [[ "$license_found" == true ]] || die "Debian package is missing $license_path"
+  for expected in \
+    "$license_path" \
+    "usr/bin/$main_binary_name" \
+    "usr/share/applications/$product_name.desktop" \
+    "usr/share/icons/hicolor/128x128/apps/$main_binary_name.png" \
+    "usr/share/icons/hicolor/scalable/apps/$main_binary_name.svg" \
+    "usr/share/metainfo/$app_identifier.metainfo.xml"; do
+    deb_listing_has_path "$contents" "$expected" || \
+      die "Debian package is missing $expected"
+  done
   artifact_names+=("$(basename "$output_file")")
 }
 
 copy_and_validate_rpm() {
   local contents
+  local expected
+  local homepage
   local license
   local license_path="/usr/lib/$product_name/LICENSE"
   local source_file
@@ -270,9 +312,20 @@ copy_and_validate_rpm() {
   license=$(rpm --query --package --queryformat '%{LICENSE}' "$output_file")
   [[ "$license" == MIT ]] || \
     die "RPM package license is '$license', expected 'MIT'"
+  homepage=$(rpm --query --package --queryformat '%{URL}' "$output_file")
+  [[ "$homepage" == "$project_homepage" ]] || \
+    die "RPM package homepage is '$homepage', expected '$project_homepage'"
   contents=$(rpm --query --package --list "$output_file")
-  grep -Fx "$license_path" <<<"$contents" >/dev/null || \
-    die "RPM package is missing $license_path"
+  for expected in \
+    "$license_path" \
+    "/usr/bin/$main_binary_name" \
+    "/usr/share/applications/$product_name.desktop" \
+    "/usr/share/icons/hicolor/128x128/apps/$main_binary_name.png" \
+    "/usr/share/icons/hicolor/scalable/apps/$main_binary_name.svg" \
+    "/usr/share/metainfo/$app_identifier.metainfo.xml"; do
+    grep -Fx "$expected" <<<"$contents" >/dev/null || \
+      die "RPM package is missing $expected"
+  done
   artifact_names+=("$(basename "$output_file")")
 }
 
@@ -293,7 +346,16 @@ copy_and_validate_appimage() {
     "$output_file" --appimage-extract >/dev/null
     [[ -x squashfs-root/AppRun ]] || exit 1
     [[ -L squashfs-root/.DirIcon ]] || exit 1
+    [[ -x "squashfs-root/usr/bin/$main_binary_name" ]] || exit 1
     [[ -f "squashfs-root/usr/lib/$product_name/LICENSE" ]] || exit 1
+    [[ -f "squashfs-root/usr/share/icons/hicolor/128x128/apps/$main_binary_name.png" ]] || exit 1
+    [[ -f "squashfs-root/usr/share/icons/hicolor/scalable/apps/$main_binary_name.svg" ]] || exit 1
+    [[ -f "squashfs-root/usr/share/metainfo/$app_identifier.metainfo.xml" ]] || exit 1
+    local desktop_file="squashfs-root/usr/share/applications/$product_name.desktop"
+    [[ -f "$desktop_file" ]] || exit 1
+    grep -Fx "Exec=$main_binary_name" "$desktop_file" >/dev/null || exit 1
+    grep -Fx "Icon=$main_binary_name" "$desktop_file" >/dev/null || exit 1
+    grep -Fx "StartupWMClass=$main_binary_name" "$desktop_file" >/dev/null || exit 1
     local link
     local link_target
     while IFS= read -r -d '' link; do
@@ -413,9 +475,25 @@ product_name=$(node -e \
   'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.productName)')
 app_version=$(node -e \
   'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.version)')
+app_identifier=$(node -e \
+  'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.identifier)')
+main_binary_name=$(node -e \
+  'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.mainBinaryName || "")')
+publisher=$(node -e \
+  'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.bundle?.publisher || "")')
+project_homepage=$(node -e \
+  'const c=JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json")); console.log(c.bundle?.homepage || "")')
 [[ -n "$product_name" ]] || die "tauri.conf.json has no productName"
+[[ "$app_identifier" =~ ^[0-9A-Za-z.-]+$ ]] || \
+  die "invalid application identifier in tauri.conf.json: $app_identifier"
+[[ "$main_binary_name" =~ ^[0-9A-Za-z._-]+$ ]] || \
+  die "invalid mainBinaryName in tauri.conf.json: $main_binary_name"
+[[ -n "$publisher" ]] || die "tauri.conf.json has no bundle publisher"
+[[ "$project_homepage" =~ ^https:// ]] || \
+  die "invalid bundle homepage in tauri.conf.json: $project_homepage"
 [[ "$app_version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || \
   die "invalid application version in tauri.conf.json: $app_version"
+validate_metainfo_source
 
 echo "linux-build: installing locked frontend dependencies"
 npm ci --prefer-offline --no-audit --no-fund

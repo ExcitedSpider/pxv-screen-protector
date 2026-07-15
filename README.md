@@ -275,6 +275,8 @@ builds/<app-version>/linux-x86_64/
 That directory contains the `.deb`, `.rpm`, and `.AppImage` packages plus
 `SHA256SUMS` and `build-info.txt`. The top-level `dist/` directory is only the
 Vite frontend output; installable desktop packages are always under `builds/`.
+Each Linux package also includes AppStream metadata identifying ExcitedSpider
+as the developer and links it to the packaged `pixiv-slides` desktop icon.
 
 Tauri prints paths under `/cache/target` while it compiles and bundles. Those
 are intermediate paths inside the build environment, not the paths consumers

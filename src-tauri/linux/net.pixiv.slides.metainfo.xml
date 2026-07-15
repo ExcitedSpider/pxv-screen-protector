@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>net.pixiv.slides</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>pixiv-slides</name>
+  <summary>A full-screen Pixiv slideshow for a desktop display</summary>
+  <developer id="io.github.excitedspider">
+    <name translate="no">ExcitedSpider</name>
+  </developer>
+  <description>
+    <p>
+      Turn a desktop display into a full-screen slideshow using illustrations
+      retrieved from a configured Pixiv account.
+    </p>
+    <p>
+      Browse followed artists or tag-based feeds, save images locally, and
+      optionally bookmark works and follow their authors.
+    </p>
+  </description>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+  <launchable type="desktop-id">pixiv-slides.desktop</launchable>
+  <provides>
+    <binary>pixiv-slides</binary>
+  </provides>
+  <url type="homepage">https://github.com/ExcitedSpider/pxv-screen-protector</url>
+  <url type="bugtracker">https://github.com/ExcitedSpider/pxv-screen-protector/issues</url>
+  <url type="vcs-browser">https://github.com/ExcitedSpider/pxv-screen-protector</url>
+</component>

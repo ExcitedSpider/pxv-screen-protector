@@ -2,7 +2,14 @@
   "name": "pixiv-slides",
   "private": true,
   "version": "0.1.3",
+  "description": "A full-screen Pixiv slideshow for a desktop display",
+  "author": "ExcitedSpider",
   "license": "MIT",
+  "homepage": "https://github.com/ExcitedSpider/pxv-screen-protector",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ExcitedSpider/pxv-screen-protector.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
