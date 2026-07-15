@@ -144,6 +144,23 @@ pub struct ApplicationInfo {
 }
 
 #[derive(Serialize)]
+pub struct SaveIllustrationResult {
+    message: String,
+    is_bookmarked: Option<bool>,
+    is_followed: Option<bool>,
+}
+
+impl SaveIllustrationResult {
+    fn new(message: String, is_bookmarked: Option<bool>, is_followed: Option<bool>) -> Self {
+        Self {
+            message,
+            is_bookmarked,
+            is_followed,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct FollowingDailyHelp {
     day: String,
     empty_day_fallback: bool,
@@ -341,7 +358,7 @@ async fn save_illustration(
     slide: save::SaveRequest,
     followed_authors: tauri::State<'_, FollowedAuthors>,
     bookmarked_illustrations: tauri::State<'_, BookmarkedIllustrations>,
-) -> Result<String, String> {
+) -> Result<SaveIllustrationResult, String> {
     let cfg = config::load()?;
     let dir = save::resolve_dir(&cfg.save_dir);
     let client = reqwest::Client::builder()
@@ -363,6 +380,21 @@ async fn save_illustration(
         }
     };
 
+    let pixiv_bookmarked = slide.is_bookmarked == Some(true);
+    let session_bookmarked = bookmarked_illustrations.contains(slide.illust_id);
+    let mut is_bookmarked = if pixiv_bookmarked || session_bookmarked {
+        Some(true)
+    } else {
+        slide.is_bookmarked
+    };
+    let pixiv_followed = slide.is_followed == Some(true);
+    let session_followed = followed_authors.contains(slide.user_id);
+    let mut is_followed = if pixiv_followed || session_followed {
+        Some(true)
+    } else {
+        slide.is_followed
+    };
+
     if !cfg.bookmark_on_save {
         log::info!(
             "event=bookmark_skipped illust_id={} reason=disabled",
@@ -373,11 +405,13 @@ async fn save_illustration(
             slide.user_id,
             slide.illust_id
         );
-        return Ok(save_status);
+        return Ok(SaveIllustrationResult::new(
+            save_status,
+            is_bookmarked,
+            is_followed,
+        ));
     }
 
-    let pixiv_bookmarked = slide.is_bookmarked == Some(true);
-    let session_bookmarked = bookmarked_illustrations.contains(slide.illust_id);
     let already_bookmarked = pixiv_bookmarked || session_bookmarked;
     let follow_configured = should_follow_author(
         &slide.feed_mode,
@@ -395,6 +429,7 @@ async fn save_illustration(
     let mut token = None;
 
     let bookmark_status = if already_bookmarked {
+        is_bookmarked = Some(true);
         let source = if pixiv_bookmarked { "pixiv" } else { "session" };
         log::info!(
             "event=bookmark_already_bookmarked illust_id={} source={}",
@@ -424,7 +459,11 @@ async fn save_illustration(
                     slide.illust_id,
                     unconfigured_follow_reason.unwrap_or("bookmark_failure")
                 );
-                return Ok(format!("{save_status} · Bookmark failed: {err}"));
+                return Ok(SaveIllustrationResult::new(
+                    format!("{save_status} · Bookmark failed: {err}"),
+                    is_bookmarked,
+                    is_followed,
+                ));
             }
         };
         let result = bookmark::add(
@@ -438,6 +477,7 @@ async fn save_illustration(
         match result {
             Ok(bookmark_status) => {
                 bookmarked_illustrations.remember(slide.illust_id);
+                is_bookmarked = Some(true);
                 log::info!(
                     "event=bookmark_success illust_id={} restrict={:?} duration_ms={}",
                     slide.illust_id,
@@ -460,7 +500,11 @@ async fn save_illustration(
                     slide.illust_id,
                     unconfigured_follow_reason.unwrap_or("bookmark_failure")
                 );
-                return Ok(format!("{save_status} · Bookmark failed: {err}"));
+                return Ok(SaveIllustrationResult::new(
+                    format!("{save_status} · Bookmark failed: {err}"),
+                    is_bookmarked,
+                    is_followed,
+                ));
             }
         }
     };
@@ -473,12 +517,15 @@ async fn save_illustration(
             slide.illust_id,
             reason
         );
-        return Ok(status);
+        return Ok(SaveIllustrationResult::new(
+            status,
+            is_bookmarked,
+            is_followed,
+        ));
     }
 
-    let pixiv_followed = slide.is_followed == Some(true);
-    let session_followed = followed_authors.contains(slide.user_id);
     if pixiv_followed || session_followed {
+        is_followed = Some(true);
         let source = if pixiv_followed { "pixiv" } else { "session" };
         log::info!(
             "event=follow_already_followed user_id={} illust_id={} source={}",
@@ -486,7 +533,11 @@ async fn save_illustration(
             slide.illust_id,
             source
         );
-        return Ok(status);
+        return Ok(SaveIllustrationResult::new(
+            status,
+            is_bookmarked,
+            is_followed,
+        ));
     }
 
     let started = Instant::now();
@@ -506,7 +557,11 @@ async fn save_illustration(
                     slide.illust_id,
                     started.elapsed().as_millis()
                 );
-                return Ok(format!("{status} · Follow failed: {err}"));
+                return Ok(SaveIllustrationResult::new(
+                    format!("{status} · Follow failed: {err}"),
+                    is_bookmarked,
+                    is_followed,
+                ));
             }
         };
     }
@@ -514,13 +569,18 @@ async fn save_illustration(
     match follow::add(&client, &token.access_token, slide.user_id).await {
         Ok(follow_status) => {
             followed_authors.remember(slide.user_id);
+            is_followed = Some(true);
             log::info!(
                 "event=follow_success user_id={} illust_id={} restrict=public duration_ms={}",
                 slide.user_id,
                 slide.illust_id,
                 started.elapsed().as_millis()
             );
-            Ok(format!("{status} · {follow_status}"))
+            Ok(SaveIllustrationResult::new(
+                format!("{status} · {follow_status}"),
+                is_bookmarked,
+                is_followed,
+            ))
         }
         Err(err) => {
             log::error!(
@@ -530,7 +590,11 @@ async fn save_illustration(
                 started.elapsed().as_millis(),
                 err
             );
-            Ok(format!("{status} · Follow failed: {err}"))
+            Ok(SaveIllustrationResult::new(
+                format!("{status} · Follow failed: {err}"),
+                is_bookmarked,
+                is_followed,
+            ))
         }
     }
 }
@@ -734,6 +798,13 @@ mod tests {
             user_id: 99,
             is_followed: Some(false),
             is_bookmarked: Some(false),
+            create_date: String::new(),
+            caption: String::new(),
+            tags: Vec::new(),
+            width: None,
+            height: None,
+            total_views: None,
+            x_restrict: None,
             image_url: "https://i.pximg.net/image.jpg".to_string(),
             page: 1,
             page_count: 1,
@@ -771,6 +842,13 @@ mod tests {
             user_id: 99,
             is_followed: Some(false),
             is_bookmarked: Some(false),
+            create_date: String::new(),
+            caption: String::new(),
+            tags: Vec::new(),
+            width: None,
+            height: None,
+            total_views: None,
+            x_restrict: None,
             image_url: "https://i.pximg.net/image.jpg".to_string(),
             page: 1,
             page_count: 1,

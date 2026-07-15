@@ -28,8 +28,9 @@ const shortcutRows = (help: HelpInfo | null, activeMode: FeedMode | null) => [
   ],
   ["R", "reload current feed"],
   ["M", "switch feed mode"],
+  ["I", "show / hide illustration information"],
   ["?", "show / hide help"],
-  ["Esc", "close help, otherwise quit"],
+  ["Esc", "close the open overlay, otherwise quit"],
 ];
 
 function ConfigRow({ label, value }: { label: string; value: string }) {

@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type FeedMode = "following_daily" | "tag_search";
 
+export interface SlideTag {
+  name: string;
+  translated_name: string | null;
+}
+
 export interface Slide {
   illust_id: number;
   user_id: number;
@@ -9,6 +14,13 @@ export interface Slide {
   is_bookmarked?: boolean | null;
   title: string;
   artist: string;
+  create_date: string;
+  caption: string;
+  tags: SlideTag[];
+  width: number | null;
+  height: number | null;
+  total_views: number | null;
+  x_restrict: number | null;
   image_url: string;
   page: number;
   page_count: number;
@@ -21,6 +33,12 @@ export interface Slide {
 
 export interface SaveRequest extends Slide {
   feed_mode: FeedMode;
+}
+
+export interface SaveIllustrationResult {
+  message: string;
+  is_bookmarked: boolean | null;
+  is_followed: boolean | null;
 }
 
 export interface SlideShow {
@@ -85,9 +103,9 @@ export const getApplicationInfo = () =>
 export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 
-/** Save the given illustration to the configured folder; returns a status string. */
+/** Save the illustration and return its latest known bookmark/follow state. */
 export const saveIllustration = (slide: Slide, mode: FeedMode) =>
-  invoke<string>("save_illustration", {
+  invoke<SaveIllustrationResult>("save_illustration", {
     slide: { ...slide, feed_mode: mode } satisfies SaveRequest,
   });
 

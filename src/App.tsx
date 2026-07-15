@@ -5,6 +5,7 @@ import { StatusOverlay } from "./components/StatusOverlay";
 import { LoadingBar } from "./components/LoadingBar";
 import { Toast } from "./components/Toast";
 import { HelpOverlay } from "./components/HelpOverlay";
+import { IllustrationInfoOverlay } from "./components/IllustrationInfoOverlay";
 import {
   loadSlideshow,
   getApplicationInfo,
@@ -26,6 +27,10 @@ const nextFeedMode = (mode?: FeedMode | null): FeedMode =>
   mode === "tag_search" ? "following_daily" : "tag_search";
 
 const isHelpKey = (e: KeyboardEvent) => e.key === "?" || (e.key === "/" && e.shiftKey);
+const isIllustrationInfoKey = (e: KeyboardEvent) =>
+  e.key === "i" || e.key === "I";
+
+type ActiveOverlay = "help" | "illustration" | null;
 
 export default function App() {
   const [slides, setSlides] = useState<Slide[]>([]);
@@ -42,7 +47,7 @@ export default function App() {
   const [helpInfo, setHelpInfo] = useState<HelpInfo | null>(null);
   const [applicationInfo, setApplicationInfo] =
     useState<ApplicationInfo | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   // Latest slide, reachable from the (stable) keyboard handler.
   const currentRef = useRef<Slide | undefined>(undefined);
@@ -106,13 +111,13 @@ export default function App() {
 
   // Auto-advance.
   useEffect(() => {
-    if (paused || slides.length < 2) return;
+    if (paused || activeOverlay || slides.length < 2) return;
     const id = setInterval(
       () => setIdx((i) => (i + 1) % slides.length),
       intervalMs,
     );
     return () => clearInterval(id);
-  }, [paused, slides.length, intervalMs, navTick]);
+  }, [paused, activeOverlay, slides.length, intervalMs, navTick]);
 
   // Preload both neighbours so stepping either way stays instant (the webview
   // keeps them decoded in memory).
@@ -133,12 +138,30 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (isHelpKey(e)) {
         e.preventDefault();
-        setHelpOpen((open) => !open);
+        if (e.repeat) return;
+        setActiveOverlay((overlay) =>
+          overlay === "help" ? null : "help",
+        );
         return;
       }
-      if (helpOpen) {
+      if (isIllustrationInfoKey(e)) {
+        e.preventDefault();
+        if (e.repeat) return;
+        if (activeOverlay === "illustration") {
+          setActiveOverlay(null);
+          return;
+        }
+        if (!currentRef.current) {
+          showToast("No illustration selected");
+          return;
+        }
+        setActiveOverlay("illustration");
+        return;
+      }
+      if (activeOverlay) {
         if (e.key === "Escape") {
-          setHelpOpen(false);
+          e.preventDefault();
+          setActiveOverlay(null);
         }
         return;
       }
@@ -191,7 +214,25 @@ export default function App() {
           saveInFlight.current = true;
           showToast("Saving…");
           saveIllustration(slide, mode)
-            .then(showToast)
+            .then((result) => {
+              setSlides((currentSlides) =>
+                // Saves can only add bookmarks/follows. Preserve fresher feed
+                // state when this request began from an older slide snapshot.
+                currentSlides.map((item) => ({
+                  ...item,
+                  is_bookmarked:
+                    item.illust_id === slide.illust_id &&
+                    result.is_bookmarked === true
+                      ? true
+                      : item.is_bookmarked,
+                  is_followed:
+                    item.user_id === slide.user_id && result.is_followed === true
+                      ? true
+                      : item.is_followed,
+                })),
+              );
+              showToast(result.message);
+            })
             .catch((err) => showToast("Save failed: " + String(err)))
             .finally(() => {
               saveInFlight.current = false;
@@ -205,7 +246,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, load, showToast, helpOpen, stepSlides]);
+  }, [slides.length, load, showToast, activeOverlay, stepSlides]);
 
   // System stats, every 2s.
   useEffect(() => {
@@ -255,10 +296,15 @@ export default function App() {
       <StatusOverlay message={overlay} />
       <Toast message={toast} />
       <HelpOverlay
-        open={helpOpen}
+        open={activeOverlay === "help"}
         activeMode={feedMode}
         help={helpInfo}
         applicationInfo={applicationInfo}
+      />
+      <IllustrationInfoOverlay
+        open={activeOverlay === "illustration"}
+        slide={current}
+        feedMode={feedMode}
       />
       <StatusBar
         slide={current}

@@ -21,6 +21,8 @@ TypeScript renders the slideshow UI.
   - `tag_search`: configured tags over a configurable recent date range.
 - In-app feed switching with `m`.
 - In-app help overlay with `?`, showing shortcuts and current mode config.
+- Illustration information overlay with `i`, showing Pixiv tags, caption,
+  publication details, engagement counts, and bookmark/follow state.
 - Configurable slide interval, multi-page cap, NSFW filtering, save folder, and
   cache size.
 - Tag-feed merge strategies:
@@ -327,10 +329,13 @@ under `$XDG_DATA_HOME/net.pixiv.slides/logs` (normally
 | `S` | save the current illustration; optionally bookmark it and, in tag mode, follow its author |
 | `R` | reload the current feed |
 | `M` | switch between following feed and tag feed |
+| `I` | show / hide information for the current illustration |
 | `?` | show / hide help |
-| `Esc` | close help, otherwise quit |
+| `Esc` | close the open overlay, otherwise quit |
 
-The help overlay also shows the active mode and current mode configuration.
+The help overlay also shows the active mode and current mode configuration. The
+illustration information overlay shows Pixiv metadata already loaded with the
+feed, so opening it does not make another API request.
 
 ## Configuration Reference
 

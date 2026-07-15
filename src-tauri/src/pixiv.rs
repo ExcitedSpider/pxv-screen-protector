@@ -19,6 +19,14 @@ struct Illust {
     id: u64,
     title: String,
     create_date: String,
+    #[serde(default)]
+    caption: String,
+    #[serde(default)]
+    tags: Vec<SlideTag>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
     page_count: u32,
     user: User,
     #[serde(default)]
@@ -28,7 +36,9 @@ struct Illust {
     #[serde(default)]
     meta_pages: Vec<MetaPage>,
     #[serde(default)]
-    total_bookmarks: u64,
+    total_bookmarks: Option<u64>,
+    #[serde(default)]
+    total_view: Option<u64>,
     /// Pixiv content restriction: 0 is general, nonzero is age-restricted.
     #[serde(default)]
     x_restrict: Option<u8>,
@@ -58,6 +68,13 @@ struct ImageUrls {
     large: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+pub struct SlideTag {
+    pub name: String,
+    #[serde(default)]
+    pub translated_name: Option<String>,
+}
+
 /// One image to display. `image_url` is the raw i.pximg.net URL; the frontend
 /// wraps it in the `pximg://` protocol so the Referer header gets attached.
 #[derive(Debug, Serialize, Clone)]
@@ -66,6 +83,13 @@ pub struct Slide {
     pub title: String,
     pub artist: String,
     pub user_id: u64,
+    pub create_date: String,
+    pub caption: String,
+    pub tags: Vec<SlideTag>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub total_views: Option<u64>,
+    pub x_restrict: Option<u8>,
     pub is_followed: Option<bool>,
     pub is_bookmarked: Option<bool>,
     pub image_url: String,
@@ -89,6 +113,10 @@ struct SearchCandidate {
 
 fn should_filter_nsfw(illust: &Illust, avoid_nsfw: bool) -> bool {
     avoid_nsfw && illust.x_restrict != Some(0)
+}
+
+fn bookmark_count(illust: &Illust) -> u64 {
+    illust.total_bookmarks.unwrap_or(0)
 }
 
 fn push_slides(
@@ -126,12 +154,19 @@ fn push_slides(
             title: illust.title.clone(),
             artist: illust.user.name.clone(),
             user_id: illust.user.id,
+            create_date: illust.create_date.clone(),
+            caption: illust.caption.clone(),
+            tags: illust.tags.clone(),
+            width: illust.width,
+            height: illust.height,
+            total_views: illust.total_view,
+            x_restrict: illust.x_restrict,
             is_followed: illust.user.is_followed,
             is_bookmarked: illust.is_bookmarked,
             image_url: url,
             page: i as u32 + 1,
             page_count: illust.page_count,
-            total_bookmarks: (illust.total_bookmarks > 0).then_some(illust.total_bookmarks),
+            total_bookmarks: illust.total_bookmarks,
             source_tags: source_tags.to_vec(),
             best_tag_rank,
             median_like_score,
@@ -360,9 +395,8 @@ pub async fn fetch_tag_slides(
                         )
                         .await?;
                         local.sort_by(|a, b| {
-                            b.illust
-                                .total_bookmarks
-                                .cmp(&a.illust.total_bookmarks)
+                            bookmark_count(&b.illust)
+                                .cmp(&bookmark_count(&a.illust))
                                 .then_with(|| b.illust.id.cmp(&a.illust.id))
                         });
                         local.truncate(max_results_per_tag);
@@ -386,7 +420,7 @@ pub async fn fetch_tag_slides(
             }
             Err(err) => return Err(err),
         };
-        candidates.retain(|candidate| candidate.illust.total_bookmarks >= tag_cfg.min_bookmarks);
+        candidates.retain(|candidate| bookmark_count(&candidate.illust) >= tag_cfg.min_bookmarks);
         assign_tag_metrics(tag, &mut candidates, recency_decay_lambda);
 
         for candidate in candidates.drain(..) {
@@ -413,14 +447,14 @@ pub async fn fetch_tag_slides(
         "per_tag_rank" => candidates.sort_by(|a, b| {
             a.best_tag_rank
                 .cmp(&b.best_tag_rank)
-                .then_with(|| b.illust.total_bookmarks.cmp(&a.illust.total_bookmarks))
+                .then_with(|| bookmark_count(&b.illust).cmp(&bookmark_count(&a.illust)))
                 .then_with(|| b.illust.id.cmp(&a.illust.id))
         }),
         "median_like_ratio" => candidates.sort_by(|a, b| {
             b.ranking_score
                 .partial_cmp(&a.ranking_score)
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| b.illust.total_bookmarks.cmp(&a.illust.total_bookmarks))
+                .then_with(|| bookmark_count(&b.illust).cmp(&bookmark_count(&a.illust)))
                 .then_with(|| b.illust.id.cmp(&a.illust.id))
         }),
         other => {
@@ -537,7 +571,7 @@ fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate], recency_dec
         candidate.source_tags = vec![tag.to_string()];
         candidate.best_tag_rank = idx + 1;
         candidate.median_like_score =
-            median_like_score(candidate.illust.total_bookmarks, sample_median);
+            median_like_score(bookmark_count(&candidate.illust), sample_median);
         candidate.ranking_score =
             candidate.median_like_score * recency_decay(&candidate.illust, recency_decay_lambda);
     }
@@ -574,7 +608,7 @@ fn sample_median_bookmarks(candidates: &[SearchCandidate]) -> f64 {
     }
     let mut likes: Vec<u64> = candidates
         .iter()
-        .map(|c| c.illust.total_bookmarks)
+        .map(|c| bookmark_count(&c.illust))
         .collect();
     likes.sort_unstable();
     let mid = likes.len() / 2;
@@ -597,9 +631,8 @@ fn median_like_score(likes: u64, sample_median: f64) -> f64 {
 
 fn sort_by_bookmarks(candidates: &mut [SearchCandidate]) {
     candidates.sort_by(|a, b| {
-        b.illust
-            .total_bookmarks
-            .cmp(&a.illust.total_bookmarks)
+        bookmark_count(&b.illust)
+            .cmp(&bookmark_count(&a.illust))
             .then_with(|| b.illust.id.cmp(&a.illust.id))
     });
 }
@@ -746,6 +779,48 @@ mod tests {
     }
 
     #[test]
+    fn slide_keeps_populated_illustration_metadata() {
+        let illust = test_illust(
+            "",
+            r#", "caption": "A test caption", "tags": [
+                {"name": "風景", "translated_name": "scenery"},
+                {"name": "空"}
+            ], "width": 2400, "height": 1600, "total_bookmarks": 123,
+            "total_view": 456, "x_restrict": 1"#,
+        );
+        let mut slides = Vec::new();
+
+        push_slides(&mut slides, &illust, 1, &[], None, None, None);
+
+        assert_eq!(slides[0].create_date, "2026-07-15T12:00:00+10:00");
+        assert_eq!(slides[0].caption, "A test caption");
+        assert_eq!(slides[0].tags.len(), 2);
+        assert_eq!(slides[0].tags[0].name, "風景");
+        assert_eq!(
+            slides[0].tags[0].translated_name.as_deref(),
+            Some("scenery")
+        );
+        assert_eq!(slides[0].tags[1].name, "空");
+        assert_eq!(slides[0].tags[1].translated_name, None);
+        assert_eq!(slides[0].width, Some(2400));
+        assert_eq!(slides[0].height, Some(1600));
+        assert_eq!(slides[0].total_bookmarks, Some(123));
+        assert_eq!(slides[0].total_views, Some(456));
+        assert_eq!(slides[0].x_restrict, Some(1));
+    }
+
+    #[test]
+    fn slide_preserves_explicit_zero_counts() {
+        let illust = test_illust("", r#", "total_bookmarks": 0, "total_view": 0"#);
+        let mut slides = Vec::new();
+
+        push_slides(&mut slides, &illust, 1, &[], None, None, None);
+
+        assert_eq!(slides[0].total_bookmarks, Some(0));
+        assert_eq!(slides[0].total_views, Some(0));
+    }
+
+    #[test]
     fn missing_follow_state_is_preserved_as_unknown() {
         let illust = test_illust("", "");
         let mut slides = Vec::new();
@@ -754,6 +829,53 @@ mod tests {
 
         assert_eq!(slides[0].is_followed, None);
         assert_eq!(slides[0].is_bookmarked, None);
+        assert_eq!(slides[0].caption, "");
+        assert!(slides[0].tags.is_empty());
+        assert_eq!(slides[0].width, None);
+        assert_eq!(slides[0].height, None);
+        assert_eq!(slides[0].total_bookmarks, None);
+        assert_eq!(slides[0].total_views, None);
+        assert_eq!(slides[0].x_restrict, None);
+    }
+
+    #[test]
+    fn multi_page_slides_share_illustration_metadata() {
+        let illust: Illust = serde_json::from_str(
+            r#"{
+                "id": 42,
+                "title": "Multi-page work",
+                "create_date": "2026-07-15T12:00:00+10:00",
+                "caption": "Shared caption",
+                "tags": [{"name": "series", "translated_name": "Series"}],
+                "width": 1200,
+                "height": 1800,
+                "page_count": 2,
+                "total_bookmarks": 0,
+                "total_view": 10,
+                "x_restrict": 0,
+                "user": {"id": 99, "name": "Test artist"},
+                "meta_pages": [
+                    {"image_urls": {"original": "https://i.pximg.net/page-1.jpg"}},
+                    {"image_urls": {"large": "https://i.pximg.net/page-2.jpg"}}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let mut slides = Vec::new();
+
+        push_slides(&mut slides, &illust, 2, &[], None, None, None);
+
+        assert_eq!(slides.len(), 2);
+        assert_eq!(slides[0].page, 1);
+        assert_eq!(slides[1].page, 2);
+        assert_eq!(slides[0].caption, "Shared caption");
+        assert_eq!(slides[1].caption, "Shared caption");
+        assert_eq!(slides[0].tags, slides[1].tags);
+        assert_eq!(slides[0].width, slides[1].width);
+        assert_eq!(slides[0].height, slides[1].height);
+        assert_eq!(slides[0].total_bookmarks, slides[1].total_bookmarks);
+        assert_eq!(slides[0].total_views, slides[1].total_views);
+        assert_eq!(slides[0].x_restrict, slides[1].x_restrict);
     }
 
     #[test]
