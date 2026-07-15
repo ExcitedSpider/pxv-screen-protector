@@ -7,12 +7,14 @@ import { Toast } from "./components/Toast";
 import { HelpOverlay } from "./components/HelpOverlay";
 import {
   loadSlideshow,
+  getApplicationInfo,
   systemStats,
   saveIllustration,
   quit,
   pximg,
   type FeedMode,
   type HelpInfo,
+  type ApplicationInfo,
   type Slide,
   type SystemStats,
 } from "./lib/api";
@@ -38,6 +40,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [feedMode, setFeedMode] = useState<FeedMode | null>(null);
   const [helpInfo, setHelpInfo] = useState<HelpInfo | null>(null);
+  const [applicationInfo, setApplicationInfo] =
+    useState<ApplicationInfo | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // Latest slide, reachable from the (stable) keyboard handler.
@@ -93,6 +97,12 @@ export default function App() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    getApplicationInfo()
+      .then(setApplicationInfo)
+      .catch(() => setApplicationInfo(null));
+  }, []);
 
   // Auto-advance.
   useEffect(() => {
@@ -244,7 +254,12 @@ export default function App() {
       <LoadingBar active={loading} />
       <StatusOverlay message={overlay} />
       <Toast message={toast} />
-      <HelpOverlay open={helpOpen} activeMode={feedMode} help={helpInfo} />
+      <HelpOverlay
+        open={helpOpen}
+        activeMode={feedMode}
+        help={helpInfo}
+        applicationInfo={applicationInfo}
+      />
       <StatusBar
         slide={current}
         idx={idx}

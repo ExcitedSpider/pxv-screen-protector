@@ -43,6 +43,11 @@ export interface HelpInfo {
   tag_search: TagSearchHelp;
 }
 
+export interface ApplicationInfo {
+  version: string;
+  build_date: string;
+}
+
 export interface FollowingDailyHelp {
   day: string;
   empty_day_fallback: boolean;
@@ -74,6 +79,8 @@ export interface SystemStats {
 
 export const loadSlideshow = (mode?: FeedMode) =>
   invoke<SlideShow>("load_slideshow", mode ? { mode } : {});
+export const getApplicationInfo = () =>
+  invoke<ApplicationInfo>("application_info");
 export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 

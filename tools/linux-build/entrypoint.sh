@@ -56,6 +56,7 @@ append_bundle_values() {
 parse_build_arguments() {
   local index=0
   local collecting_bundles=0
+  local collecting_features=0
   local arg
 
   while (( index < ${#build_args[@]} )); do
@@ -85,32 +86,47 @@ parse_build_arguments() {
       -b|--bundles)
         explicit_bundles=1
         collecting_bundles=1
+        collecting_features=0
         ;;
       --bundles=*)
         explicit_bundles=1
         collecting_bundles=0
+        collecting_features=0
         append_bundle_values "${arg#*=}"
         ;;
       -b=*)
         explicit_bundles=1
         collecting_bundles=0
+        collecting_features=0
         append_bundle_values "${arg#*=}"
         ;;
       -b?*)
         explicit_bundles=1
         collecting_bundles=0
+        collecting_features=0
         append_bundle_values "${arg#-b}"
+        ;;
+      -f|--features)
+        collecting_bundles=0
+        collecting_features=1
+        ;;
+      --features=*|-f=*|-f?*)
+        collecting_bundles=0
+        collecting_features=0
         ;;
       --target=*)
         target_triple=${arg#*=}
         collecting_bundles=0
+        collecting_features=0
         ;;
       -t=*)
         target_triple=${arg#*=}
         collecting_bundles=0
+        collecting_features=0
         ;;
       -t|--target)
         collecting_bundles=0
+        collecting_features=0
         (( index + 1 < ${#build_args[@]} )) || die "$arg requires a target triple"
         ((index += 1))
         target_triple=${build_args[index]}
@@ -118,16 +134,26 @@ parse_build_arguments() {
       -t?*)
         target_triple=${arg#-t}
         collecting_bundles=0
+        collecting_features=0
+        ;;
+      -v|--verbose|-vv*|--ci|--skip-stapling|--ignore-version-mismatches|--no-sign)
+        collecting_bundles=0
+        collecting_features=0
         ;;
       --)
         die "custom Cargo runner arguments are not supported by the controlled build"
         ;;
       -*)
         collecting_bundles=0
+        collecting_features=0
         ;;
       *)
         if (( collecting_bundles )); then
           append_bundle_values "$arg"
+        elif (( collecting_features )); then
+          :
+        else
+          die "custom Cargo runner arguments are not supported by the controlled build: $arg"
         fi
         ;;
     esac
@@ -297,8 +323,34 @@ write_metadata() {
   printf '%s\n' "$target_arch" > "$OUTPUT_DIR/.arch"
 }
 
-[[ ${1:-} == build ]] || die "usage: pixiv-slides-linux-build build [TAURI_BUILD_ARGS...]"
+command_mode=${1:-}
+case "$command_mode" in
+  build|validate)
+    ;;
+  *)
+    die "usage: pixiv-slides-linux-build {build|validate} [TAURI_BUILD_ARGS...]"
+    ;;
+esac
 shift
+
+declare -a build_args=("$@")
+declare -a locked_build_args=()
+declare -a requested_bundles=()
+declare -a artifact_names=()
+explicit_bundles=0
+target_triple=$(rustc -vV | grep '^host:' | cut -d ' ' -f 2)
+
+parse_build_arguments
+inject_locked_runner_argument
+target_arch=${target_triple%%-*}
+
+if [[ "$command_mode" == validate ]]; then
+  if ! cargo tauri build "${build_args[@]}" --help >/dev/null; then
+    die "Tauri rejected the controlled build arguments"
+  fi
+  echo "linux-build: build arguments are valid (${requested_bundles[*]}) for $target_triple"
+  exit 0
+fi
 
 require_directory "$SOURCE_DIR" "source tree"
 require_directory "$OUTPUT_DIR" "output directory"
@@ -314,17 +366,6 @@ require_directory "$TAURI_CACHE_DIR" "Tauri tools cache"
 if [[ -n $(find "$OUTPUT_DIR" -mindepth 1 -print -quit) ]]; then
   die "output directory must be empty: $OUTPUT_DIR"
 fi
-
-declare -a build_args=("$@")
-declare -a locked_build_args=()
-declare -a requested_bundles=()
-declare -a artifact_names=()
-explicit_bundles=0
-target_triple=$(rustc -vV | grep '^host:' | cut -d ' ' -f 2)
-
-parse_build_arguments
-inject_locked_runner_argument
-target_arch=${target_triple%%-*}
 
 export CARGO_HOME=$CARGO_CACHE_DIR
 export CARGO_TARGET_DIR=$TARGET_CACHE_DIR

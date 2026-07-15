@@ -16,6 +16,7 @@ Usage:
   ./dev.sh {help|-h|--help}
   ./dev.sh dev [TAURI_DEV_ARGS...]
   ./dev.sh build [TAURI_BUILD_ARGS...]
+  ./dev.sh release [TAURI_BUILD_ARGS...]
   ./dev.sh build-host [TAURI_BUILD_ARGS...]
   ./dev.sh build-image
   ./dev.sh build-clean
@@ -29,6 +30,10 @@ Commands:
                   Release-compatible Tauri options are forwarded. With no
                   arguments, all configured formats (DEB, RPM, AppImage) build.
                   Published packages are listed under builds/<version>/linux-<arch>/.
+  release         Increment and commit the patch version, run the controlled
+                  build, atomically push its tag, and publish a GitHub release.
+                  Requires a clean, synchronized branch and authenticated gh.
+                  A failed release resumes at the saved stage when rerun.
   build-host      Build directly with the host Rust/Tauri toolchain.
   build-image     Create or refresh the controlled Linux builder image.
   build-clean     Remove only the builder image and project build caches.
@@ -65,6 +70,9 @@ case "$command_name" in
         ;;
     build)
         exec ./tools/linux-build/build.sh build "$@"
+        ;;
+    release)
+        exec ./tools/linux-build/build.sh release "$@"
         ;;
     build-host)
         exec cargo tauri build "$@"

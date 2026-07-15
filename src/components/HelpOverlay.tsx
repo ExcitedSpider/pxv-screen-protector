@@ -1,4 +1,4 @@
-import type { FeedMode, HelpInfo } from "../lib/api";
+import type { ApplicationInfo, FeedMode, HelpInfo } from "../lib/api";
 
 const modeName = (mode?: string | null) =>
   mode === "tag_search" || mode === "tags" ? "Tag feed" : "Following feed";
@@ -45,10 +45,12 @@ export function HelpOverlay({
   open,
   activeMode,
   help,
+  applicationInfo,
 }: {
   open: boolean;
   activeMode: FeedMode | null;
   help: HelpInfo | null;
+  applicationInfo: ApplicationInfo | null;
 }) {
   if (!open) return null;
 
@@ -67,6 +69,11 @@ export function HelpOverlay({
             <h1 className="text-[30px] font-semibold tracking-normal">Help</h1>
             <p className="mt-1 text-[14px] text-white/60">
               Active: {modeName(activeMode)}
+            </p>
+            <p className="mt-1 text-[13px] text-white/45">
+              {applicationInfo
+                ? `Version ${applicationInfo.version} · Built ${applicationInfo.build_date} UTC`
+                : "Version … · Build date …"}
             </p>
           </div>
           <div className="text-[13px] text-white/50">Press ? to close</div>

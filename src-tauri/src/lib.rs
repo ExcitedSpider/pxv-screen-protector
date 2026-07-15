@@ -137,6 +137,12 @@ pub struct HelpInfo {
 }
 
 #[derive(Serialize)]
+pub struct ApplicationInfo {
+    version: String,
+    build_date: String,
+}
+
+#[derive(Serialize)]
 pub struct FollowingDailyHelp {
     day: String,
     empty_day_fallback: bool,
@@ -156,6 +162,26 @@ pub struct TagSearchHelp {
     fallback_without_popular_sort: String,
     merge_strategy: String,
     recency_decay_lambda: f64,
+}
+
+fn build_date_from_epoch(epoch: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(epoch, 0)
+        .expect("embedded build timestamp is outside the supported range")
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// Version and build information embedded in this application binary.
+#[tauri::command]
+fn application_info(app: tauri::AppHandle) -> ApplicationInfo {
+    let build_epoch = env!("PIXIV_SLIDES_BUILD_EPOCH")
+        .parse::<i64>()
+        .expect("PIXIV_SLIDES_BUILD_EPOCH must be a Unix timestamp");
+
+    ApplicationInfo {
+        version: app.package_info().version.to_string(),
+        build_date: build_date_from_epoch(build_epoch),
+    }
 }
 
 /// Load config, refresh the token, and fetch the configured feed.
@@ -623,6 +649,7 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            application_info,
             load_slideshow,
             system_stats,
             save_illustration,
@@ -635,8 +662,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        reconcile_session_state, should_follow_author, BookmarkedIllustrations, FollowedAuthors,
+        build_date_from_epoch, reconcile_session_state, should_follow_author,
+        BookmarkedIllustrations, FollowedAuthors,
     };
+
+    #[test]
+    fn formats_embedded_build_dates_in_utc() {
+        assert_eq!(build_date_from_epoch(0), "1970-01-01");
+        assert_eq!(build_date_from_epoch(1_752_537_600), "2025-07-15");
+    }
 
     #[test]
     fn follows_only_unfollowed_tag_feed_authors_after_bookmarking() {

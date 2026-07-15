@@ -66,6 +66,8 @@ For a release build, the host needs [Podman](https://podman.io/) plus the
 standard Linux command-line tools used by `dev.sh` (Bash, coreutils, Git, and
 `flock`). The default `./dev.sh build` uses the project's Ubuntu builder image,
 which supplies Rust, Node.js, Tauri, WebKitGTK, and the Linux packaging tools.
+Publishing with `./dev.sh release` additionally requires the GitHub CLI (`gh`)
+authenticated to `github.com` with push access to the upstream repository.
 
 Host development additionally requires:
 
@@ -190,6 +192,7 @@ targets, and no-bundle invocations so its output contract stays stable:
 
 ```bash
 ./dev.sh build [TAURI_BUILD_ARGS...]
+./dev.sh release [TAURI_BUILD_ARGS...]
 ./dev.sh build-image
 ./dev.sh build-clean
 ./dev.sh build-host [TAURI_BUILD_ARGS...]
@@ -205,6 +208,54 @@ builder. The repository is mounted read-only, copied to a disposable container
 workspace, and built without access to the host's Podman socket. The build is
 staged and published only after validation, so a failed attempt does not
 overwrite the previous successful artifacts.
+
+`./dev.sh release` turns that controlled build into a complete GitHub release.
+It requires a clean checked-out branch that exactly matches its fetched
+upstream, a configured Git author, and an authenticated GitHub CLI with push
+access (`gh auth login -h github.com`). After verifying the forwarded build
+arguments and synchronized npm, Cargo, lockfile, and Tauri versions, it:
+
+1. increments the patch version (for example, `0.1.1` to `0.1.2`);
+2. commits only the five application version files as `chore: release v0.1.2`;
+3. exports that commit with `git archive`, then builds and validates the
+   packages from the immutable tracked snapshot (ignored local files such as
+   `.env.production` cannot enter the release build, and a pre/post fingerprint
+   rejects snapshot changes during packaging);
+4. creates an annotated `v0.1.2` tag and atomically pushes the branch and tag;
+5. creates a draft GitHub release with generated notes, uploads the packages,
+   `SHA256SUMS`, and `build-info.txt`, then publishes it.
+
+Release assets come from the verified `SHA256SUMS` manifest, never from a broad
+file glob. This prevents stale files from being uploaded. Before the draft is
+made public, the workflow also compares every remote asset's byte size and
+GitHub-reported SHA-256 digest with the local package or metadata file. The tag
+is created only after the packages pass validation, and `gh` must verify the
+pushed tag rather than creating one implicitly. A retry repairs the assets of
+an incomplete draft with `--clobber`; it never modifies an already-published
+release.
+
+The version helper fingerprints the complete deterministic patch result before
+changing the worktree. The Git workflow verifies that fingerprint both before
+the commit and on every resume, so unrelated edits hidden inside one of the
+five version files cannot ride along with a release commit. Remote branch and
+annotated-tag identities are also checked immediately before and after making
+the draft public; if they change during publication, the workflow attempts to
+return the release to draft state and stops. Repository rules should still
+forbid force-updating release tags, since no client-side workflow can remove
+every external race window.
+
+If any step fails, rerun the same `./dev.sh release` command after correcting
+the problem, including the same Tauri build arguments. The ignored
+`builds/.release-state` file records the exact version, build-argument and
+deterministic-bump fingerprints, commit, annotated tag object, artifact
+directory, and publication stage, so a retry resumes the same release instead
+of incrementing the version again. If
+upstream advances during
+the build without changing a version file, the next retry replays the unpushed
+release commit on that new tip and asks for one more retry, ensuring any changed
+build tooling is loaded before its packages are rebuilt. It stops for manual
+resolution if upstream changed a version file, and it never force-pushes or
+deletes published refs.
 
 The default Tauri target is `all`. On Linux, that means all configured package
 formats: DEB, RPM, and AppImage. It does not mean all CPU architectures. The
@@ -234,6 +285,9 @@ image layers and project-scoped package/compilation caches. The related
 commands are:
 
 - `./dev.sh build-image` — explicitly build or refresh the controlled builder.
+- `./dev.sh release` — increment and commit the patch version, create the
+  controlled Linux packages, atomically push the release tag, and publish the
+  checksum-selected assets as a GitHub release.
 - `./dev.sh build-clean` — remove only this project's builder image, named
   build-cache volumes, and stale staging directories. It does not remove a
   successful `builds/<app-version>/` directory or perform a global Podman
