@@ -460,3 +460,6 @@ visible to other Pixiv users.
 ## License
 
 [MIT](LICENSE) (c) 2026 ExcitedSpider
+
+Linux bundles declare the MIT license and include its text at
+`/usr/lib/pixiv-slides/LICENSE`.

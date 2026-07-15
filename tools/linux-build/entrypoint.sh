@@ -235,22 +235,44 @@ find_one_bundle() {
 }
 
 copy_and_validate_deb() {
+  local contents
+  local entry
+  local license_found=false
+  local license_path="usr/lib/$product_name/LICENSE"
   local source_file
   local output_file
   source_file=$(find_one_bundle deb deb)
   output_file="$OUTPUT_DIR/$(basename "$source_file")"
   cp -- "$source_file" "$output_file"
   dpkg-deb --info "$output_file" >/dev/null
+  contents=$(dpkg-deb --contents "$output_file")
+  while IFS= read -r entry; do
+    entry=${entry##* }
+    if [[ "$entry" == "$license_path" || "$entry" == "./$license_path" ]]; then
+      license_found=true
+      break
+    fi
+  done <<<"$contents"
+  [[ "$license_found" == true ]] || die "Debian package is missing $license_path"
   artifact_names+=("$(basename "$output_file")")
 }
 
 copy_and_validate_rpm() {
+  local contents
+  local license
+  local license_path="/usr/lib/$product_name/LICENSE"
   local source_file
   local output_file
   source_file=$(find_one_bundle rpm rpm)
   output_file="$OUTPUT_DIR/$(basename "$source_file")"
   cp -- "$source_file" "$output_file"
   rpm --query --package --info "$output_file" >/dev/null
+  license=$(rpm --query --package --queryformat '%{LICENSE}' "$output_file")
+  [[ "$license" == MIT ]] || \
+    die "RPM package license is '$license', expected 'MIT'"
+  contents=$(rpm --query --package --list "$output_file")
+  grep -Fx "$license_path" <<<"$contents" >/dev/null || \
+    die "RPM package is missing $license_path"
   artifact_names+=("$(basename "$output_file")")
 }
 
@@ -271,6 +293,7 @@ copy_and_validate_appimage() {
     "$output_file" --appimage-extract >/dev/null
     [[ -x squashfs-root/AppRun ]] || exit 1
     [[ -L squashfs-root/.DirIcon ]] || exit 1
+    [[ -f "squashfs-root/usr/lib/$product_name/LICENSE" ]] || exit 1
     local link
     local link_target
     while IFS= read -r -d '' link; do
