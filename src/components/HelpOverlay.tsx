@@ -116,6 +116,10 @@ export function HelpOverlay({
                   value={`${help?.max_pages_per_post ?? 3} per post`}
                 />
                 <ConfigRow
+                  label="Avoid NSFW"
+                  value={boolText(help?.avoid_nsfw)}
+                />
+                <ConfigRow
                   label="Bookmark on save"
                   value={boolText(help?.bookmark_on_save)}
                 />

@@ -29,6 +29,9 @@ struct Illust {
     meta_pages: Vec<MetaPage>,
     #[serde(default)]
     total_bookmarks: u64,
+    /// Pixiv content restriction: 0 is general, nonzero is age-restricted.
+    #[serde(default)]
+    x_restrict: Option<u8>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -82,6 +85,10 @@ struct SearchCandidate {
     best_tag_rank: usize,
     median_like_score: f64,
     ranking_score: f64,
+}
+
+fn should_filter_nsfw(illust: &Illust, avoid_nsfw: bool) -> bool {
+    avoid_nsfw && illust.x_restrict != Some(0)
 }
 
 fn push_slides(
@@ -141,6 +148,7 @@ pub async fn fetch_yesterday_slides(
     access_token: &str,
     max_pages_per_post: usize,
     empty_day_fallback: bool,
+    avoid_nsfw: bool,
 ) -> Result<Vec<Slide>, String> {
     let today = Local::now().date_naive();
     let yesterday = today - Duration::days(1);
@@ -226,19 +234,49 @@ pub async fn fetch_yesterday_slides(
         }
 
         let mut reached_older = false;
+        let mut filtered_nsfw = 0usize;
         for illust in &resp.illusts {
             let dt = DateTime::parse_from_rfc3339(&illust.create_date)
                 .map_err(|e| format!("bad create_date {}: {e}", illust.create_date))?;
             let date = dt.with_timezone(&Local).date_naive();
 
-            if date == yesterday {
-                push_slides(&mut slides, illust, max_pages_per_post, &[], None, None, None);
-            } else if date >= today {
-                push_slides(&mut fallback, illust, max_pages_per_post, &[], None, None, None);
-            } else {
+            if date < yesterday {
                 reached_older = true;
                 break;
             }
+            if should_filter_nsfw(illust, avoid_nsfw) {
+                filtered_nsfw += 1;
+                continue;
+            }
+
+            if date == yesterday {
+                push_slides(
+                    &mut slides,
+                    illust,
+                    max_pages_per_post,
+                    &[],
+                    None,
+                    None,
+                    None,
+                );
+            } else if date >= today {
+                push_slides(
+                    &mut fallback,
+                    illust,
+                    max_pages_per_post,
+                    &[],
+                    None,
+                    None,
+                    None,
+                );
+            }
+        }
+        if filtered_nsfw > 0 {
+            log::info!(
+                "event=nsfw_filter feed_mode=following_daily page={} filtered={} policy=explicit_general_only",
+                page,
+                filtered_nsfw
+            );
         }
 
         if reached_older {
@@ -266,6 +304,7 @@ pub async fn fetch_tag_slides(
     access_token: &str,
     tag_cfg: &crate::config::TagFeedConfig,
     max_pages_per_post: usize,
+    avoid_nsfw: bool,
 ) -> Result<Vec<Slide>, String> {
     let tags: Vec<String> = tag_cfg
         .tags
@@ -299,6 +338,7 @@ pub async fn fetch_tag_slides(
             end,
             max_results_per_tag,
             max_search_pages,
+            avoid_nsfw,
         )
         .await
         {
@@ -316,6 +356,7 @@ pub async fn fetch_tag_slides(
                             end,
                             usize::MAX,
                             max_search_pages,
+                            avoid_nsfw,
                         )
                         .await?;
                         local.sort_by(|a, b| {
@@ -418,6 +459,7 @@ async fn search_tag(
     end: chrono::NaiveDate,
     result_limit: usize,
     page_limit: usize,
+    avoid_nsfw: bool,
 ) -> Result<Vec<SearchCandidate>, String> {
     let start_s = start.to_string();
     let end_s = end.to_string();
@@ -438,17 +480,19 @@ async fn search_tag(
     let mut out = Vec::new();
     for page in 1..=page_limit {
         let resp = get_search_page(client, access_token, &url, tag, sort, page).await?;
-        for illust in resp.illusts {
-            out.push(SearchCandidate {
-                illust,
-                source_tags: Vec::new(),
-                best_tag_rank: usize::MAX,
-                median_like_score: 0.0,
-                ranking_score: 0.0,
-            });
-            if out.len() >= result_limit {
-                return Ok(out);
-            }
+        let filtered_nsfw =
+            append_search_candidates(&mut out, resp.illusts, result_limit, avoid_nsfw);
+        if filtered_nsfw > 0 {
+            log::info!(
+                "event=nsfw_filter feed_mode=tag_search tag={:?} sort={:?} page={} filtered={} policy=explicit_general_only",
+                tag,
+                sort,
+                page,
+                filtered_nsfw
+            );
+        }
+        if out.len() >= result_limit {
+            return Ok(out);
         }
         match resp.next_url {
             Some(next) => url = next,
@@ -456,6 +500,35 @@ async fn search_tag(
         }
     }
     Ok(out)
+}
+
+fn append_search_candidates(
+    out: &mut Vec<SearchCandidate>,
+    illusts: Vec<Illust>,
+    result_limit: usize,
+    avoid_nsfw: bool,
+) -> usize {
+    if out.len() >= result_limit {
+        return 0;
+    }
+    let mut filtered_nsfw = 0usize;
+    for illust in illusts {
+        if should_filter_nsfw(&illust, avoid_nsfw) {
+            filtered_nsfw += 1;
+            continue;
+        }
+        out.push(SearchCandidate {
+            illust,
+            source_tags: Vec::new(),
+            best_tag_rank: usize::MAX,
+            median_like_score: 0.0,
+            ranking_score: 0.0,
+        });
+        if out.len() >= result_limit {
+            break;
+        }
+    }
+    filtered_nsfw
 }
 
 fn assign_tag_metrics(tag: &str, candidates: &mut [SearchCandidate], recency_decay_lambda: f64) {
@@ -499,7 +572,10 @@ fn sample_median_bookmarks(candidates: &[SearchCandidate]) -> f64 {
     if candidates.is_empty() {
         return 0.0;
     }
-    let mut likes: Vec<u64> = candidates.iter().map(|c| c.illust.total_bookmarks).collect();
+    let mut likes: Vec<u64> = candidates
+        .iter()
+        .map(|c| c.illust.total_bookmarks)
+        .collect();
     likes.sort_unstable();
     let mid = likes.len() / 2;
     if likes.len() % 2 == 1 {
@@ -633,7 +709,7 @@ fn url_host(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{push_slides, Illust};
+    use super::{append_search_candidates, push_slides, should_filter_nsfw, Illust};
 
     fn test_illust(user_extra: &str, illust_extra: &str) -> Illust {
         serde_json::from_str(&format!(
@@ -678,5 +754,40 @@ mod tests {
 
         assert_eq!(slides[0].is_followed, None);
         assert_eq!(slides[0].is_bookmarked, None);
+    }
+
+    #[test]
+    fn nsfw_filter_is_opt_in_and_requires_an_explicit_general_rating() {
+        let general = test_illust("", ", \"x_restrict\": 0");
+        let r18 = test_illust("", ", \"x_restrict\": 1");
+        let r18g = test_illust("", ", \"x_restrict\": 2");
+        let unknown = test_illust("", ", \"x_restrict\": 99");
+        let missing = test_illust("", "");
+
+        assert!(!should_filter_nsfw(&general, false));
+        assert!(!should_filter_nsfw(&r18, false));
+        assert!(!should_filter_nsfw(&r18g, false));
+        assert!(!should_filter_nsfw(&unknown, false));
+        assert!(!should_filter_nsfw(&missing, false));
+
+        assert!(!should_filter_nsfw(&general, true));
+        assert!(should_filter_nsfw(&r18, true));
+        assert!(should_filter_nsfw(&r18g, true));
+        assert!(should_filter_nsfw(&unknown, true));
+        assert!(should_filter_nsfw(&missing, true));
+    }
+
+    #[test]
+    fn filtered_search_results_do_not_consume_the_accepted_result_limit() {
+        let restricted = test_illust("", ", \"x_restrict\": 1");
+        let general = test_illust("", ", \"x_restrict\": 0");
+        let mut candidates = Vec::new();
+
+        let filtered =
+            append_search_candidates(&mut candidates, vec![restricted, general], 1, true);
+
+        assert_eq!(filtered, 1);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].illust.x_restrict, Some(0));
     }
 }

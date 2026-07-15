@@ -36,6 +36,7 @@ export interface HelpInfo {
   configured_feed_mode: string;
   slide_interval_secs: number;
   max_pages_per_post: number;
+  avoid_nsfw: boolean;
   bookmark_on_save: boolean;
   bookmark_restrict: string;
   bookmark_tags: string[];

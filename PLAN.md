@@ -30,7 +30,7 @@ Reference for prior art: https://github.com/asadahimeka/pixiv-viewer-app
 |------------------|----------------------------------------------------------------|
 | "Yesterday" TZ   | User's **local** KDE system timezone                            |
 | Multi-page posts | **First page + cap**: up to **3** pages per post (configurable) |
-| Content filter   | **Everything** the follows post (incl. R-18), `restrict=public` |
+| Content filter   | All by default; `avoid_nsfw = true` keeps general works only    |
 | Token storage    | Plaintext **config file** in `~/.config/pixiv-slides/`          |
 | Slide interval   | **5 minutes** (configurable)                                    |
 | Platform         | Fedora / KDE, Tauri                                             |
@@ -116,6 +116,7 @@ refresh_token = "xxxxxxxx"
 slide_interval_secs = 300   # 5 minutes
 max_pages_per_post = 3
 empty_day_fallback = true
+avoid_nsfw = false
 ```
 
 ---

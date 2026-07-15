@@ -129,6 +129,7 @@ pub struct HelpInfo {
     configured_feed_mode: String,
     slide_interval_secs: u64,
     max_pages_per_post: usize,
+    avoid_nsfw: bool,
     bookmark_on_save: bool,
     bookmark_restrict: String,
     bookmark_tags: Vec<String>,
@@ -214,6 +215,7 @@ async fn load_slideshow(
                 &token.access_token,
                 cfg.max_pages_per_post,
                 cfg.empty_day_fallback,
+                cfg.avoid_nsfw,
             )
             .await?;
             (slides, yesterday.clone(), "following_daily")
@@ -224,6 +226,7 @@ async fn load_slideshow(
                 &token.access_token,
                 &cfg.tag_feed,
                 cfg.max_pages_per_post,
+                cfg.avoid_nsfw,
             )
             .await?;
             let range_days = cfg.tag_feed.range_days.clamp(1, 366);
@@ -264,6 +267,7 @@ async fn load_slideshow(
             configured_feed_mode,
             slide_interval_secs: cfg.slide_interval_secs,
             max_pages_per_post: cfg.max_pages_per_post,
+            avoid_nsfw: cfg.avoid_nsfw,
             bookmark_on_save: cfg.bookmark_on_save,
             bookmark_restrict: cfg.bookmark_restrict,
             bookmark_tags: cfg.bookmark_tags,

@@ -21,7 +21,8 @@ TypeScript renders the slideshow UI.
   - `tag_search`: configured tags over a configurable recent date range.
 - In-app feed switching with `m`.
 - In-app help overlay with `?`, showing shortcuts and current mode config.
-- Configurable slide interval, multi-page cap, save folder, and cache size.
+- Configurable slide interval, multi-page cap, NSFW filtering, save folder, and
+  cache size.
 - Tag-feed merge strategies:
   - `raw_bookmarks`: globally sort by Pixiv bookmark count.
   - `per_tag_rank`: interleave tags by each work's rank within its own tag.
@@ -51,6 +52,10 @@ timezone, and optionally falls back to today so far when yesterday is empty.
 by `merge_strategy`, expanded into slides, then capped by `max_slides`.
 When both `bookmark_on_save` and `follow_when_bookmark` are enabled, a successful
 tag-feed save and bookmark also publicly follows the work's author.
+
+**Content filter:** by default, both feeds include all content returned by
+Pixiv. Set `avoid_nsfw = true` to exclude works that Pixiv does not explicitly
+mark as general content before they are expanded into slides.
 
 **Images:** Pixiv's CDN rejects normal webview image loads without a Pixiv
 `Referer`. The frontend therefore renders `pximg://...` URLs; Rust handles that
@@ -141,6 +146,7 @@ refresh_token = "..."
 feed_mode = "tag_search"
 slide_interval_secs = 300
 max_pages_per_post = 3
+avoid_nsfw = true
 save_dir = "~/Pictures/pixiv-slides"
 bookmark_on_save = true
 bookmark_restrict = "private"
@@ -334,6 +340,7 @@ feed_mode = "following_daily"        # "following_daily" or "tag_search"
 slide_interval_secs = 300            # seconds between slides
 max_pages_per_post = 3               # cap pages shown per multi-page post
 empty_day_fallback = true            # following feed: use today if yesterday empty
+avoid_nsfw = false                   # exclude works not marked as general content
 save_dir = "~/Pictures/pixiv-slides" # where `s` saves images
 bookmark_on_save = false             # if true, `s` also adds a Pixiv bookmark
 bookmark_restrict = "private"        # "private" or "public"
@@ -396,11 +403,16 @@ max_results_per_tag = 30
 max_slides = 120
 ```
 
-the app fetches up to 150 tag-results, filters out anything below
-`min_bookmarks`, deduplicates the survivors, sorts them, expands multi-page
-posts up to `max_pages_per_post`, then stops at 120 slides. Because `max_slides`
-counts slides, not illustrations, multi-page posts can reduce the number of
-distinct works shown.
+the app keeps up to 150 tag-results across the five per-tag samples. With
+`avoid_nsfw` enabled, filtered works do not consume a per-tag result cap, so the
+app can scan additional results up to `max_search_pages_per_tag`. It then
+filters out anything below `min_bookmarks`, deduplicates the survivors, sorts
+them, expands multi-page posts up to `max_pages_per_post`, and stops at 120
+slides. Because `max_slides` counts slides, not illustrations, multi-page posts
+can reduce the number of distinct works shown.
+
+Configuration is read each time the feed loads. After changing `avoid_nsfw`,
+press `r` to reload the active feed; restarting the app is not required.
 
 ## Privacy
 

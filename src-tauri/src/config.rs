@@ -19,6 +19,9 @@ pub struct Config {
     /// If yesterday's feed is empty, fall back to today-so-far.
     #[serde(default = "default_true")]
     pub empty_day_fallback: bool,
+    /// Exclude works that Pixiv does not explicitly mark as general content.
+    #[serde(default)]
+    pub avoid_nsfw: bool,
     /// Folder to save illustrations into (supports a leading `~/`).
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
@@ -181,6 +184,21 @@ mod tests {
         let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
 
         assert!(!config.tag_feed.follow_when_bookmark);
+    }
+
+    #[test]
+    fn avoid_nsfw_defaults_to_false() {
+        let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
+
+        assert!(!config.avoid_nsfw);
+    }
+
+    #[test]
+    fn avoid_nsfw_can_be_enabled() {
+        let config: Config =
+            toml::from_str("refresh_token = \"token\"\navoid_nsfw = true").unwrap();
+
+        assert!(config.avoid_nsfw);
     }
 
     #[test]

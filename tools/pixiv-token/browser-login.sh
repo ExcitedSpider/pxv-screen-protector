@@ -112,6 +112,7 @@ refresh_token = "$REFRESH"
 slide_interval_secs = 300
 max_pages_per_post = 3
 empty_day_fallback = true
+avoid_nsfw = false
 EOF
 chmod 600 "$CONFIG_FILE"
 
