@@ -89,6 +89,9 @@ export function IllustrationInfoOverlay({
     slide?.width == null || slide.height == null
       ? "Unknown"
       : `${slide.width.toLocaleString()} × ${slide.height.toLocaleString()} px`;
+  const pixivUrl = slide
+    ? `https://www.pixiv.net/artworks/${slide.illust_id}`
+    : "";
 
   return (
     <div
@@ -129,6 +132,7 @@ export function IllustrationInfoOverlay({
                 </h2>
                 <dl className="rounded-lg bg-white/[0.06] p-4 ring-1 ring-white/10">
                   <InfoRow label="Illustration ID" value={`${slide.illust_id}`} />
+                  <InfoRow label="Pixiv URL" value={pixivUrl} />
                   <InfoRow label="User ID" value={`${slide.user_id}`} />
                   <InfoRow
                     label="Page"
