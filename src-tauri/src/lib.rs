@@ -9,24 +9,105 @@ mod save;
 mod system;
 
 use serde::Serialize;
-use std::{collections::HashSet, sync::Mutex};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
 
 #[derive(Default)]
-struct FollowedAuthors(Mutex<HashSet<u64>>);
+struct VersionedIds {
+    next_generation: u64,
+    entries: HashMap<u64, u64>,
+}
+
+impl VersionedIds {
+    fn contains(&self, id: u64) -> bool {
+        self.entries.contains_key(&id)
+    }
+
+    fn remember(&mut self, id: u64) {
+        self.next_generation = self.next_generation.wrapping_add(1);
+        if self.next_generation == 0 {
+            self.next_generation = 1;
+        }
+        self.entries.insert(id, self.next_generation);
+    }
+
+    fn snapshot(&self) -> HashMap<u64, u64> {
+        self.entries.clone()
+    }
+
+    fn forget_if_unchanged(&mut self, id: u64, generation: u64) -> bool {
+        if self.entries.get(&id) != Some(&generation) {
+            return false;
+        }
+        self.entries.remove(&id);
+        true
+    }
+}
+
+#[derive(Default)]
+struct FollowedAuthors(Mutex<VersionedIds>);
 
 impl FollowedAuthors {
     fn contains(&self, user_id: u64) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains(&user_id)
+            .contains(user_id)
     }
 
     fn remember(&self, user_id: u64) {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(user_id);
+            .remember(user_id);
+    }
+
+    fn snapshot(&self) -> HashMap<u64, u64> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot()
+    }
+
+    fn forget_if_unchanged(&self, user_id: u64, generation: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .forget_if_unchanged(user_id, generation)
+    }
+}
+
+#[derive(Default)]
+struct BookmarkedIllustrations(Mutex<VersionedIds>);
+
+impl BookmarkedIllustrations {
+    fn contains(&self, illust_id: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(illust_id)
+    }
+
+    fn remember(&self, illust_id: u64) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remember(illust_id);
+    }
+
+    fn snapshot(&self) -> HashMap<u64, u64> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot()
+    }
+
+    fn forget_if_unchanged(&self, illust_id: u64, generation: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .forget_if_unchanged(illust_id, generation)
     }
 }
 
@@ -79,7 +160,13 @@ pub struct TagSearchHelp {
 
 /// Load config, refresh the token, and fetch the configured feed.
 #[tauri::command]
-async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
+async fn load_slideshow(
+    mode: Option<String>,
+    followed_authors: tauri::State<'_, FollowedAuthors>,
+    bookmarked_illustrations: tauri::State<'_, BookmarkedIllustrations>,
+) -> Result<SlideShow, String> {
+    let followed_at_load = followed_authors.snapshot();
+    let bookmarked_at_load = bookmarked_illustrations.snapshot();
     let cfg = config::load()?;
     let client = reqwest::Client::builder()
         .build()
@@ -133,6 +220,14 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
         }
     };
 
+    reconcile_session_state(
+        &slides,
+        &followed_authors,
+        &bookmarked_illustrations,
+        &followed_at_load,
+        &bookmarked_at_load,
+    );
+
     Ok(SlideShow {
         slides,
         interval_secs: cfg.slide_interval_secs,
@@ -168,6 +263,41 @@ async fn load_slideshow(mode: Option<String>) -> Result<SlideShow, String> {
     })
 }
 
+fn reconcile_session_state(
+    slides: &[pixiv::Slide],
+    followed_authors: &FollowedAuthors,
+    bookmarked_illustrations: &BookmarkedIllustrations,
+    followed_at_load: &HashMap<u64, u64>,
+    bookmarked_at_load: &HashMap<u64, u64>,
+) {
+    for slide in slides {
+        let removed_bookmark = bookmarked_at_load
+            .get(&slide.illust_id)
+            .is_some_and(|generation| {
+                slide.is_bookmarked == Some(false)
+                    && bookmarked_illustrations.forget_if_unchanged(slide.illust_id, *generation)
+            });
+        if removed_bookmark {
+            log::info!(
+                "event=bookmark_state_reconciled illust_id={} state=not_bookmarked source=pixiv",
+                slide.illust_id
+            );
+        }
+        let removed_follow = followed_at_load
+            .get(&slide.user_id)
+            .is_some_and(|generation| {
+                slide.is_followed == Some(false)
+                    && followed_authors.forget_if_unchanged(slide.user_id, *generation)
+            });
+        if removed_follow {
+            log::info!(
+                "event=follow_state_reconciled user_id={} state=not_followed source=pixiv",
+                slide.user_id
+            );
+        }
+    }
+}
+
 /// System stats for the status bar (polled periodically by the frontend).
 #[tauri::command]
 fn system_stats() -> system::SystemStats {
@@ -180,53 +310,198 @@ fn system_stats() -> system::SystemStats {
 async fn save_illustration(
     slide: save::SaveRequest,
     followed_authors: tauri::State<'_, FollowedAuthors>,
+    bookmarked_illustrations: tauri::State<'_, BookmarkedIllustrations>,
 ) -> Result<String, String> {
     let cfg = config::load()?;
     let dir = save::resolve_dir(&cfg.save_dir);
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| format!("http client build failed: {e}"))?;
-    let save_status = save::save(&client, &slide, &dir).await?;
+    let save_status = match save::save(&client, &slide, &dir).await {
+        Ok(status) => status,
+        Err(err) => {
+            log::info!(
+                "event=bookmark_skipped illust_id={} reason=save_failure",
+                slide.illust_id
+            );
+            log::info!(
+                "event=follow_skipped user_id={} illust_id={} reason=save_failure",
+                slide.user_id,
+                slide.illust_id
+            );
+            return Err(err);
+        }
+    };
 
     if !cfg.bookmark_on_save {
+        log::info!(
+            "event=bookmark_skipped illust_id={} reason=disabled",
+            slide.illust_id
+        );
+        log::info!(
+            "event=follow_skipped user_id={} illust_id={} reason=bookmark_disabled",
+            slide.user_id,
+            slide.illust_id
+        );
         return Ok(save_status);
     }
 
-    let token = match auth::refresh(&client, &cfg.refresh_token).await {
-        Ok(token) => token,
-        Err(err) => return Ok(format!("{save_status} · Bookmark failed: {err}")),
-    };
-    let bookmark_status = match bookmark::add(
-        &client,
-        &token.access_token,
-        slide.illust_id,
-        &cfg.bookmark_restrict,
-        &cfg.bookmark_tags,
-    )
-    .await
-    {
-        Ok(bookmark_status) => bookmark_status,
-        Err(err) => return Ok(format!("{save_status} · Bookmark failed: {err}")),
-    };
-    let status = format!("{save_status} · {bookmark_status}");
-
-    let already_followed = slide.is_followed == Some(true)
-        || followed_authors.contains(slide.user_id);
-    if !should_follow_author(
+    let pixiv_bookmarked = slide.is_bookmarked == Some(true);
+    let session_bookmarked = bookmarked_illustrations.contains(slide.illust_id);
+    let already_bookmarked = pixiv_bookmarked || session_bookmarked;
+    let follow_configured = should_follow_author(
         &slide.feed_mode,
         cfg.bookmark_on_save,
         cfg.tag_feed.follow_when_bookmark,
-        already_followed,
-    ) {
+        false,
+    );
+    let unconfigured_follow_reason = if follow_configured {
+        None
+    } else if slide.feed_mode.trim() != "tag_search" {
+        Some("non_tag_feed")
+    } else {
+        Some("disabled")
+    };
+    let mut token = None;
+
+    let bookmark_status = if already_bookmarked {
+        let source = if pixiv_bookmarked { "pixiv" } else { "session" };
+        log::info!(
+            "event=bookmark_already_bookmarked illust_id={} source={}",
+            slide.illust_id,
+            source
+        );
+        "Already bookmarked".to_string()
+    } else {
+        let started = Instant::now();
+        log::info!(
+            "event=bookmark_start illust_id={} restrict={:?} tags_count={}",
+            slide.illust_id,
+            cfg.bookmark_restrict,
+            cfg.bookmark_tags.len()
+        );
+        let refreshed = match auth::refresh(&client, &cfg.refresh_token).await {
+            Ok(token) => token,
+            Err(err) => {
+                log::error!(
+                    "event=bookmark_failure illust_id={} stage=oauth_refresh duration_ms={}",
+                    slide.illust_id,
+                    started.elapsed().as_millis()
+                );
+                log::info!(
+                    "event=follow_skipped user_id={} illust_id={} reason={}",
+                    slide.user_id,
+                    slide.illust_id,
+                    unconfigured_follow_reason.unwrap_or("bookmark_failure")
+                );
+                return Ok(format!("{save_status} · Bookmark failed: {err}"));
+            }
+        };
+        let result = bookmark::add(
+            &client,
+            &refreshed.access_token,
+            slide.illust_id,
+            &cfg.bookmark_restrict,
+            &cfg.bookmark_tags,
+        )
+        .await;
+        match result {
+            Ok(bookmark_status) => {
+                bookmarked_illustrations.remember(slide.illust_id);
+                log::info!(
+                    "event=bookmark_success illust_id={} restrict={:?} duration_ms={}",
+                    slide.illust_id,
+                    cfg.bookmark_restrict,
+                    started.elapsed().as_millis()
+                );
+                token = Some(refreshed);
+                bookmark_status
+            }
+            Err(err) => {
+                log::error!(
+                    "event=bookmark_failure illust_id={} stage=api duration_ms={} error={:?}",
+                    slide.illust_id,
+                    started.elapsed().as_millis(),
+                    err
+                );
+                log::info!(
+                    "event=follow_skipped user_id={} illust_id={} reason={}",
+                    slide.user_id,
+                    slide.illust_id,
+                    unconfigured_follow_reason.unwrap_or("bookmark_failure")
+                );
+                return Ok(format!("{save_status} · Bookmark failed: {err}"));
+            }
+        }
+    };
+    let status = format!("{save_status} · {bookmark_status}");
+
+    if let Some(reason) = unconfigured_follow_reason {
+        log::info!(
+            "event=follow_skipped user_id={} illust_id={} reason={}",
+            slide.user_id,
+            slide.illust_id,
+            reason
+        );
         return Ok(status);
     }
 
+    let pixiv_followed = slide.is_followed == Some(true);
+    let session_followed = followed_authors.contains(slide.user_id);
+    if pixiv_followed || session_followed {
+        let source = if pixiv_followed { "pixiv" } else { "session" };
+        log::info!(
+            "event=follow_already_followed user_id={} illust_id={} source={}",
+            slide.user_id,
+            slide.illust_id,
+            source
+        );
+        return Ok(status);
+    }
+
+    let started = Instant::now();
+    log::info!(
+        "event=follow_start user_id={} illust_id={} artist={:?} restrict=public",
+        slide.user_id,
+        slide.illust_id,
+        slide.artist
+    );
+    if token.is_none() {
+        token = match auth::refresh(&client, &cfg.refresh_token).await {
+            Ok(token) => Some(token),
+            Err(err) => {
+                log::error!(
+                    "event=follow_failure user_id={} illust_id={} stage=oauth_refresh duration_ms={}",
+                    slide.user_id,
+                    slide.illust_id,
+                    started.elapsed().as_millis()
+                );
+                return Ok(format!("{status} · Follow failed: {err}"));
+            }
+        };
+    }
+    let token = token.expect("access token must be available before following");
     match follow::add(&client, &token.access_token, slide.user_id).await {
         Ok(follow_status) => {
             followed_authors.remember(slide.user_id);
+            log::info!(
+                "event=follow_success user_id={} illust_id={} restrict=public duration_ms={}",
+                slide.user_id,
+                slide.illust_id,
+                started.elapsed().as_millis()
+            );
             Ok(format!("{status} · {follow_status}"))
         }
-        Err(err) => Ok(format!("{status} · Follow failed: {err}")),
+        Err(err) => {
+            log::error!(
+                "event=follow_failure user_id={} illust_id={} stage=api duration_ms={} error={:?}",
+                slide.user_id,
+                slide.illust_id,
+                started.elapsed().as_millis(),
+                err
+            );
+            Ok(format!("{status} · Follow failed: {err}"))
+        }
     }
 }
 
@@ -318,14 +593,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(FollowedAuthors::default())
+        .manage(BookmarkedIllustrations::default())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("pximg", move |_ctx, request, responder| {
@@ -360,7 +634,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_follow_author, FollowedAuthors};
+    use super::{
+        reconcile_session_state, should_follow_author, BookmarkedIllustrations, FollowedAuthors,
+    };
 
     #[test]
     fn follows_only_unfollowed_tag_feed_authors_after_bookmarking() {
@@ -384,5 +660,98 @@ mod tests {
             true,
             followed_authors.contains(42),
         ));
+    }
+
+    #[test]
+    fn remembers_successfully_bookmarked_illustrations_for_the_session() {
+        let bookmarked_illustrations = BookmarkedIllustrations::default();
+
+        assert!(!bookmarked_illustrations.contains(42));
+        bookmarked_illustrations.remember(42);
+        assert!(bookmarked_illustrations.contains(42));
+        assert!(!bookmarked_illustrations.contains(43));
+    }
+
+    #[test]
+    fn an_existing_bookmark_does_not_block_a_configured_follow() {
+        let bookmarked_illustrations = BookmarkedIllustrations::default();
+        bookmarked_illustrations.remember(42);
+
+        assert!(bookmarked_illustrations.contains(42));
+        assert!(should_follow_author("tag_search", true, true, false));
+    }
+
+    #[test]
+    fn fresh_negative_pixiv_state_clears_session_mutations() {
+        let followed_authors = FollowedAuthors::default();
+        let bookmarked_illustrations = BookmarkedIllustrations::default();
+        followed_authors.remember(99);
+        bookmarked_illustrations.remember(42);
+        let followed_at_load = followed_authors.snapshot();
+        let bookmarked_at_load = bookmarked_illustrations.snapshot();
+        let slides = vec![crate::pixiv::Slide {
+            illust_id: 42,
+            title: "Work".to_string(),
+            artist: "Artist".to_string(),
+            user_id: 99,
+            is_followed: Some(false),
+            is_bookmarked: Some(false),
+            image_url: "https://i.pximg.net/image.jpg".to_string(),
+            page: 1,
+            page_count: 1,
+            total_bookmarks: Some(0),
+            source_tags: Vec::new(),
+            best_tag_rank: None,
+            median_like_score: None,
+            ranking_score: None,
+        }];
+
+        reconcile_session_state(
+            &slides,
+            &followed_authors,
+            &bookmarked_illustrations,
+            &followed_at_load,
+            &bookmarked_at_load,
+        );
+
+        assert!(!followed_authors.contains(99));
+        assert!(!bookmarked_illustrations.contains(42));
+    }
+
+    #[test]
+    fn stale_reload_preserves_mutations_recorded_after_it_started() {
+        let followed_authors = FollowedAuthors::default();
+        let bookmarked_illustrations = BookmarkedIllustrations::default();
+        let followed_at_load = followed_authors.snapshot();
+        let bookmarked_at_load = bookmarked_illustrations.snapshot();
+        followed_authors.remember(99);
+        bookmarked_illustrations.remember(42);
+        let slides = vec![crate::pixiv::Slide {
+            illust_id: 42,
+            title: "Work".to_string(),
+            artist: "Artist".to_string(),
+            user_id: 99,
+            is_followed: Some(false),
+            is_bookmarked: Some(false),
+            image_url: "https://i.pximg.net/image.jpg".to_string(),
+            page: 1,
+            page_count: 1,
+            total_bookmarks: Some(0),
+            source_tags: Vec::new(),
+            best_tag_rank: None,
+            median_like_score: None,
+            ranking_score: None,
+        }];
+
+        reconcile_session_state(
+            &slides,
+            &followed_authors,
+            &bookmarked_illustrations,
+            &followed_at_load,
+            &bookmarked_at_load,
+        );
+
+        assert!(followed_authors.contains(99));
+        assert!(bookmarked_illustrations.contains(42));
     }
 }

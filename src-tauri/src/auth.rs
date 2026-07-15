@@ -1,6 +1,7 @@
 //! Pixiv OAuth: exchange a refresh token for a short-lived access token.
 
 use serde::Deserialize;
+use std::time::Instant;
 
 // Well-known constants from the official Pixiv mobile app (same as pixivpy).
 // NOTE: the client_id ends in "DS8" — "DS9" yields "Invalid OAuth client".
@@ -29,6 +30,7 @@ pub async fn refresh(
     client: &reqwest::Client,
     refresh_token: &str,
 ) -> Result<TokenResponse, String> {
+    let started = Instant::now();
     // pixivpy uses local-time digits with a literal "+00:00" suffix.
     let now = chrono::Local::now()
         .format("%Y-%m-%dT%H:%M:%S+00:00")
@@ -53,15 +55,61 @@ pub async fn refresh(
         .header("Accept-Language", "en-US")
         .form(&params)
         .send()
-        .await
-        .map_err(|e| format!("auth request failed: {e}"))?;
+        .await;
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=oauth_refresh outcome=failure duration_ms={} error={:?}",
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("auth request failed: {err}"));
+        }
+    };
 
     let status = resp.status();
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let body = match resp.text().await {
+        Ok(body) => body,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=oauth_refresh outcome=failure status={} duration_ms={} error={:?}",
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("auth response read failed: {err}"));
+        }
+    };
     if !status.is_success() {
+        log::error!(
+            "event=api_timing operation=oauth_refresh outcome=failure status={} duration_ms={}",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         return Err(format!(
             "auth failed ({status}). Is your refresh_token valid? Body: {body}"
         ));
     }
-    serde_json::from_str(&body).map_err(|e| format!("auth response parse failed: {e}; body={body}"))
+    match serde_json::from_str(&body) {
+        Ok(token) => {
+            log::info!(
+                "event=api_timing operation=oauth_refresh outcome=success status={} duration_ms={}",
+                status.as_u16(),
+                started.elapsed().as_millis()
+            );
+            Ok(token)
+        }
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=oauth_refresh outcome=failure status={} duration_ms={} error={:?}",
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            // Do not include the OAuth response body: a successful response
+            // contains both access and refresh tokens.
+            Err(format!("auth response parse failed: {err}"))
+        }
+    }
 }

@@ -157,16 +157,17 @@ See [config.example.toml](config.example.toml) for all defaults.
 
 ### 3. Run
 
-From the repo root:
+List the project commands (this does not launch the app):
 
 ```bash
 ./dev.sh
+./dev.sh help
 ```
 
-Equivalent:
+Launch the development app:
 
 ```bash
-cargo tauri dev
+./dev.sh dev
 ```
 
 The Tauri `beforeDevCommand` starts Vite through
@@ -174,11 +175,20 @@ The Tauri `beforeDevCommand` starts Vite through
 `pixiv-slides-vite`. If a previous dev container was left behind, the script
 uses `--replace`.
 
-Build:
+The wrapper also exposes the common build and validation commands. Additional
+arguments are forwarded to Cargo/Tauri for `dev`, `build`, `check`, and `test`:
 
 ```bash
-cargo tauri build
+./dev.sh build [TAURI_BUILD_ARGS...]
+./dev.sh check [CARGO_CHECK_ARGS...]
+./dev.sh test [CARGO_TEST_ARGS...]
+./dev.sh frontend-build
 ```
+
+The Rust backend logs save, bookmark, and follow decisions and API durations at
+info level. Logs appear in the launch terminal and, through `tauri-plugin-log`,
+under `$XDG_DATA_HOME/net.pixiv.slides/logs` (normally
+`~/.local/share/net.pixiv.slides/logs`).
 
 ## Controls
 

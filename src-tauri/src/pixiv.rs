@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Duration, Local};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use std::{cmp::Ordering, collections::HashMap};
 
 const FOLLOW_URL: &str = "https://app-api.pixiv.net/v2/illust/follow?restrict=public";
@@ -20,6 +21,8 @@ struct Illust {
     create_date: String,
     page_count: u32,
     user: User,
+    #[serde(default)]
+    is_bookmarked: Option<bool>,
     #[serde(default)]
     meta_single_page: MetaSinglePage,
     #[serde(default)]
@@ -61,6 +64,7 @@ pub struct Slide {
     pub artist: String,
     pub user_id: u64,
     pub is_followed: Option<bool>,
+    pub is_bookmarked: Option<bool>,
     pub image_url: String,
     pub page: u32,
     pub page_count: u32,
@@ -116,6 +120,7 @@ fn push_slides(
             artist: illust.user.name.clone(),
             user_id: illust.user.id,
             is_followed: illust.user.is_followed,
+            is_bookmarked: illust.is_bookmarked,
             image_url: url,
             page: i as u32 + 1,
             page_count: illust.page_count,
@@ -143,19 +148,78 @@ pub async fn fetch_yesterday_slides(
     let mut slides: Vec<Slide> = Vec::new();
     let mut fallback: Vec<Slide> = Vec::new();
     let mut url = FOLLOW_URL.to_string();
+    let mut page = 1usize;
 
     loop {
-        let resp: IllustResponse = client
+        let started = Instant::now();
+        let host = url_host(&url);
+        let response = client
             .get(&url)
             .header("User-Agent", crate::auth::USER_AGENT)
             .header("Authorization", format!("Bearer {access_token}"))
             .header("Accept-Language", "en-US")
             .send()
-            .await
-            .map_err(|e| format!("feed request failed: {e}"))?
-            .json()
-            .await
-            .map_err(|e| format!("feed parse failed: {e}"))?;
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                log::error!(
+                    "event=api_timing operation=following_feed_page outcome=failure stage=request page={} url_host={:?} duration_ms={} error={:?}",
+                    page,
+                    host,
+                    started.elapsed().as_millis(),
+                    err.to_string()
+                );
+                return Err(format!("feed request failed: {err}"));
+            }
+        };
+        let status = response.status();
+        let body = match response.text().await {
+            Ok(body) => body,
+            Err(err) => {
+                log::error!(
+                    "event=api_timing operation=following_feed_page outcome=failure stage=body page={} url_host={:?} status={} duration_ms={} error={:?}",
+                    page,
+                    host,
+                    status.as_u16(),
+                    started.elapsed().as_millis(),
+                    err.to_string()
+                );
+                return Err(format!("feed body read failed: {err}"));
+            }
+        };
+        if !status.is_success() {
+            log::error!(
+                "event=api_timing operation=following_feed_page outcome=failure stage=response page={} url_host={:?} status={} duration_ms={}",
+                page,
+                host,
+                status.as_u16(),
+                started.elapsed().as_millis()
+            );
+            return Err(format!("feed request failed ({status})"));
+        }
+        let resp: IllustResponse = match serde_json::from_str(&body) {
+            Ok(resp) => resp,
+            Err(err) => {
+                log::error!(
+                    "event=api_timing operation=following_feed_page outcome=failure stage=parse page={} url_host={:?} status={} duration_ms={} error={:?}",
+                    page,
+                    host,
+                    status.as_u16(),
+                    started.elapsed().as_millis(),
+                    err.to_string()
+                );
+                return Err(format!("feed parse failed: {err}"));
+            }
+        };
+        log::info!(
+            "event=api_timing operation=following_feed_page outcome=success page={} url_host={:?} status={} items={} duration_ms={}",
+            page,
+            host,
+            status.as_u16(),
+            resp.illusts.len(),
+            started.elapsed().as_millis()
+        );
 
         if resp.illusts.is_empty() {
             break;
@@ -181,7 +245,10 @@ pub async fn fetch_yesterday_slides(
             break;
         }
         match resp.next_url {
-            Some(next) => url = next,
+            Some(next) => {
+                url = next;
+                page += 1;
+            }
             None => break,
         }
     }
@@ -369,8 +436,8 @@ async fn search_tag(
     .to_string();
 
     let mut out = Vec::new();
-    for _ in 0..page_limit {
-        let resp = get_search_page(client, access_token, &url, tag, sort).await?;
+    for page in 1..=page_limit {
+        let resp = get_search_page(client, access_token, &url, tag, sort, page).await?;
         for illust in resp.illusts {
             out.push(SearchCandidate {
                 illust,
@@ -467,35 +534,108 @@ async fn get_search_page(
     url: &str,
     tag: &str,
     sort: &str,
+    page: usize,
 ) -> Result<IllustResponse, String> {
+    let started = Instant::now();
+    let host = url_host(url);
     let resp = client
         .get(url)
         .header("User-Agent", crate::auth::USER_AGENT)
         .header("Authorization", format!("Bearer {access_token}"))
         .header("Accept-Language", "en-US")
         .send()
-        .await
-        .map_err(|e| format!("tag search request failed for {tag:?}: {e}"))?;
+        .await;
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=tag_search_page outcome=failure stage=request tag={:?} sort={:?} page={} url_host={:?} duration_ms={} error={:?}",
+                tag,
+                sort,
+                page,
+                host,
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("tag search request failed for {tag:?}: {err}"));
+        }
+    };
 
     let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("tag search body read failed for {tag:?}: {e}"))?;
+    let body = match resp.text().await {
+        Ok(body) => body,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=tag_search_page outcome=failure stage=body tag={:?} sort={:?} page={} url_host={:?} status={} duration_ms={} error={:?}",
+                tag,
+                sort,
+                page,
+                host,
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("tag search body read failed for {tag:?}: {err}"));
+        }
+    };
     if !status.is_success() {
+        log::error!(
+            "event=api_timing operation=tag_search_page outcome=failure stage=response tag={:?} sort={:?} page={} url_host={:?} status={} duration_ms={}",
+            tag,
+            sort,
+            page,
+            host,
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         return Err(format!(
             "tag search failed ({status}) for {tag:?} with sort={sort}: {body}"
         ));
     }
-    serde_json::from_str(&body)
-        .map_err(|e| format!("tag search parse failed for {tag:?}: {e}; body={body}"))
+    match serde_json::from_str::<IllustResponse>(&body) {
+        Ok(resp) => {
+            log::info!(
+                "event=api_timing operation=tag_search_page outcome=success tag={:?} sort={:?} page={} url_host={:?} status={} items={} duration_ms={}",
+                tag,
+                sort,
+                page,
+                host,
+                status.as_u16(),
+                resp.illusts.len(),
+                started.elapsed().as_millis()
+            );
+            Ok(resp)
+        }
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=tag_search_page outcome=failure stage=parse tag={:?} sort={:?} page={} url_host={:?} status={} duration_ms={} error={:?}",
+                tag,
+                sort,
+                page,
+                host,
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            Err(format!(
+                "tag search parse failed for {tag:?}: {err}; body={body}"
+            ))
+        }
+    }
+}
+
+fn url_host(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{push_slides, Illust};
 
-    fn test_illust(user_extra: &str) -> Illust {
+    fn test_illust(user_extra: &str, illust_extra: &str) -> Illust {
         serde_json::from_str(&format!(
             r#"{{
                 "id": 42,
@@ -510,6 +650,7 @@ mod tests {
                 "meta_single_page": {{
                     "original_image_url": "https://i.pximg.net/img-original/test.jpg"
                 }}
+                {illust_extra}
             }}"#
         ))
         .unwrap()
@@ -517,7 +658,7 @@ mod tests {
 
     #[test]
     fn slide_keeps_author_identity_and_follow_state() {
-        let illust = test_illust(", \"is_followed\": true");
+        let illust = test_illust(", \"is_followed\": true", ", \"is_bookmarked\": true");
         let mut slides = Vec::new();
 
         push_slides(&mut slides, &illust, 1, &[], None, None, None);
@@ -525,15 +666,17 @@ mod tests {
         assert_eq!(slides.len(), 1);
         assert_eq!(slides[0].user_id, 99);
         assert_eq!(slides[0].is_followed, Some(true));
+        assert_eq!(slides[0].is_bookmarked, Some(true));
     }
 
     #[test]
     fn missing_follow_state_is_preserved_as_unknown() {
-        let illust = test_illust("");
+        let illust = test_illust("", "");
         let mut slides = Vec::new();
 
         push_slides(&mut slides, &illust, 1, &[], None, None, None);
 
         assert_eq!(slides[0].is_followed, None);
+        assert_eq!(slides[0].is_bookmarked, None);
     }
 }

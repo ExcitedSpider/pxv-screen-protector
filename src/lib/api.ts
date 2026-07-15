@@ -6,6 +6,7 @@ export interface Slide {
   illust_id: number;
   user_id: number;
   is_followed?: boolean | null;
+  is_bookmarked?: boolean | null;
   title: string;
   artist: string;
   image_url: string;

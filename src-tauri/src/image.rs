@@ -3,6 +3,7 @@
 //! backed by an on-disk LRU cache (see `cache.rs`).
 
 use std::path::Path;
+use std::time::Instant;
 
 const PREFIX: &str = "pximg://localhost/";
 
@@ -59,27 +60,72 @@ fn decode_url(uri: &str) -> Result<String, String> {
 
 /// Download an image from Pixiv's CDN with the required Referer.
 async fn download(client: &reqwest::Client, real: &str) -> Result<Vec<u8>, String> {
+    let started = Instant::now();
+    let host = reqwest::Url::parse(real)
+        .ok()
+        .and_then(|url| url.host_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "unknown".to_string());
     let resp = client
         .get(real)
         .header("Referer", "https://www.pixiv.net/")
         .header("User-Agent", crate::auth::USER_AGENT)
         .send()
-        .await
-        .map_err(|e| format!("image fetch failed: {e}"))?;
+        .await;
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=image_proxy_download outcome=failure stage=request url_host={:?} duration_ms={} error={:?}",
+                host,
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("image fetch failed: {err}"));
+        }
+    };
 
     if !resp.status().is_success() {
-        return Err(format!("image fetch {}: {real}", resp.status()));
+        let status = resp.status();
+        log::error!(
+            "event=api_timing operation=image_proxy_download outcome=failure stage=response url_host={:?} status={} duration_ms={}",
+            host,
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
+        return Err(format!("image fetch {status}: {real}"));
     }
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("image body read failed: {e}"))?
-        .to_vec();
+    let status = resp.status();
+    let bytes = match resp.bytes().await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=image_proxy_download outcome=failure stage=body url_host={:?} status={} duration_ms={} error={:?}",
+                host,
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("image body read failed: {err}"));
+        }
+    };
 
     if bytes.is_empty() {
+        log::error!(
+            "event=api_timing operation=image_proxy_download outcome=failure stage=body url_host={:?} status={} bytes=0 duration_ms={}",
+            host,
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         return Err(format!("empty image body: {real}"));
     }
+    log::info!(
+        "event=api_timing operation=image_proxy_download outcome=success url_host={:?} status={} bytes={} duration_ms={}",
+        host,
+        status.as_u16(),
+        bytes.len(),
+        started.elapsed().as_millis()
+    );
     Ok(bytes)
 }
 

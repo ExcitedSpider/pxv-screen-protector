@@ -1,5 +1,7 @@
 //! Pixiv bookmark operations used by the save action.
 
+use std::time::Instant;
+
 const BOOKMARK_ADD_URL: &str = "https://app-api.pixiv.net/v2/illust/bookmark/add";
 
 pub async fn add(
@@ -19,6 +21,7 @@ pub async fn add(
         data.push(("tags[]", tags.clone()));
     }
 
+    let started = Instant::now();
     let resp = client
         .post(BOOKMARK_ADD_URL)
         .header("User-Agent", crate::auth::USER_AGENT)
@@ -26,17 +29,50 @@ pub async fn add(
         .header("Accept-Language", "en-US")
         .form(&data)
         .send()
-        .await
-        .map_err(|e| format!("bookmark request failed: {e}"))?;
+        .await;
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=bookmark_add outcome=failure illust_id={} duration_ms={} error={:?}",
+                illust_id,
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("bookmark request failed: {err}"));
+        }
+    };
 
     let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("bookmark response read failed: {e}"))?;
+    let body = match resp.text().await {
+        Ok(body) => body,
+        Err(err) => {
+            log::error!(
+                "event=api_timing operation=bookmark_add outcome=failure illust_id={} status={} duration_ms={} error={:?}",
+                illust_id,
+                status.as_u16(),
+                started.elapsed().as_millis(),
+                err.to_string()
+            );
+            return Err(format!("bookmark response read failed: {err}"));
+        }
+    };
     if !status.is_success() {
+        log::error!(
+            "event=api_timing operation=bookmark_add outcome=failure illust_id={} status={} duration_ms={}",
+            illust_id,
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         return Err(format!("bookmark failed ({status}): {body}"));
     }
+
+    log::info!(
+        "event=api_timing operation=bookmark_add outcome=success illust_id={} status={} duration_ms={}",
+        illust_id,
+        status.as_u16(),
+        started.elapsed().as_millis()
+    );
 
     Ok(format!("Bookmarked {restrict}"))
 }

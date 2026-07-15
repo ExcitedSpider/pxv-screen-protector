@@ -1,19 +1,78 @@
 #!/usr/bin/env bash
 #
-# Launch the dev stack from the repo root, regardless of your current dir.
-# Equivalent to `cargo tauri dev`, which boots the Vite container via
-# beforeDevCommand. Ctrl-C/app exit stops the project Vite container.
+# Project command wrapper. Run without arguments (or with `help`) to list the
+# available commands. Commands work from any current directory.
 #
-# A leftover Vite container from a previous unclean exit is handled
-# automatically: fe.sh runs it with `--name pixiv-slides-vite --replace`, so a
-# relaunch just takes over the name and port — no process-killing needed.
+# The `dev` command is equivalent to `cargo tauri dev`, which boots the Vite
+# container via beforeDevCommand. Ctrl-C/app exit stops that project container.
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-cleanup() {
-    podman stop pixiv-slides-vite >/dev/null 2>&1 || true
-}
-trap cleanup EXIT INT TERM
+usage() {
+    cat <<'EOF'
+Usage:
+  ./dev.sh
+  ./dev.sh {help|-h|--help}
+  ./dev.sh dev [TAURI_DEV_ARGS...]
+  ./dev.sh build [TAURI_BUILD_ARGS...]
+  ./dev.sh check [CARGO_CHECK_ARGS...]
+  ./dev.sh test [CARGO_TEST_ARGS...]
+  ./dev.sh frontend-build
 
-cargo tauri dev "$@"
+Commands:
+  dev             Launch the Tauri app and containerized Vite dev server.
+  build           Build the Tauri desktop application.
+  check           Check the Rust backend without building artifacts for release.
+  test            Run the Rust backend test suite.
+  frontend-build  Type-check and build the frontend inside Podman.
+  help            Show this help without launching the app.
+EOF
+}
+
+command_name="${1:-help}"
+if (($# > 0)); then
+    shift
+fi
+
+case "$command_name" in
+    help|-h|--help)
+        if (($# > 0)); then
+            echo "error: help does not accept arguments" >&2
+            usage >&2
+            exit 2
+        fi
+        usage
+        ;;
+    dev)
+        cleanup() {
+            podman stop pixiv-slides-vite >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        cargo tauri dev "$@"
+        ;;
+    build)
+        exec cargo tauri build "$@"
+        ;;
+    check)
+        exec cargo check --manifest-path src-tauri/Cargo.toml "$@"
+        ;;
+    test)
+        exec cargo test --manifest-path src-tauri/Cargo.toml "$@"
+        ;;
+    frontend-build)
+        if (($# > 0)); then
+            echo "error: frontend-build does not accept arguments" >&2
+            usage >&2
+            exit 2
+        fi
+        exec ./tools/frontend/fe.sh build
+        ;;
+    *)
+        echo "error: unknown command: $command_name" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
