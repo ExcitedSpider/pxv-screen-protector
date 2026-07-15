@@ -16,13 +16,23 @@ Usage:
   ./dev.sh {help|-h|--help}
   ./dev.sh dev [TAURI_DEV_ARGS...]
   ./dev.sh build [TAURI_BUILD_ARGS...]
+  ./dev.sh build-host [TAURI_BUILD_ARGS...]
+  ./dev.sh build-image
+  ./dev.sh build-clean
   ./dev.sh check [CARGO_CHECK_ARGS...]
   ./dev.sh test [CARGO_TEST_ARGS...]
   ./dev.sh frontend-build
 
 Commands:
   dev             Launch the Tauri app and containerized Vite dev server.
-  build           Build the Tauri desktop application.
+  build           Build Linux packages in the controlled Podman environment.
+                  Release-compatible Tauri options are forwarded. With no
+                  arguments, all configured formats (DEB, RPM, AppImage) build.
+                  Published packages are listed under builds/<version>/linux-<arch>/.
+  build-host      Build directly with the host Rust/Tauri toolchain.
+  build-image     Create or refresh the controlled Linux builder image.
+  build-clean     Remove only the builder image and project build caches.
+                  Previously completed artifacts under builds/ are preserved.
   check           Check the Rust backend without building artifacts for release.
   test            Run the Rust backend test suite.
   frontend-build  Type-check and build the frontend inside Podman.
@@ -54,7 +64,26 @@ case "$command_name" in
         cargo tauri dev "$@"
         ;;
     build)
+        exec ./tools/linux-build/build.sh build "$@"
+        ;;
+    build-host)
         exec cargo tauri build "$@"
+        ;;
+    build-image)
+        if (($# > 0)); then
+            echo "error: build-image does not accept arguments" >&2
+            usage >&2
+            exit 2
+        fi
+        exec ./tools/linux-build/build.sh image
+        ;;
+    build-clean)
+        if (($# > 0)); then
+            echo "error: build-clean does not accept arguments" >&2
+            usage >&2
+            exit 2
+        fi
+        exec ./tools/linux-build/build.sh clean
         ;;
     check)
         exec cargo check --manifest-path src-tauri/Cargo.toml "$@"

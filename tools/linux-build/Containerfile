@@ -1,0 +1,123 @@
+# syntax=docker/dockerfile:1
+
+# Keep Node separate from the runtime base so the Linux packages are always
+# produced against Ubuntu 22.04's older glibc and desktop libraries.
+FROM docker.io/library/node:22-bookworm-slim@sha256:16d364eebf6b62da439dc993d9b80940c78b0ca38438452f011ab9a25c752644 AS node
+
+FROM docker.io/library/ubuntu:22.04@sha256:14be402d3f1eeeb5e7da73d3260322c68e7b51c88388f53e88eb21d6450bd520
+
+ARG RUST_VERSION=1.96.0
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    APPIMAGE_EXTRACT_AND_RUN=1
+
+# Tauri's documented Debian/Ubuntu prerequisites, plus the tools needed to
+# create and validate every configured Linux bundle format.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        file \
+        git \
+        libayatana-appindicator3-dev \
+        librsvg2-dev \
+        libssl-dev \
+        libwebkit2gtk-4.1-dev \
+        libxdo-dev \
+        patchelf \
+        pkg-config \
+        rpm \
+        rsync \
+        wget \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/ /usr/local/
+
+RUN curl --proto '=https' --tlsv1.2 --fail --show-error --location \
+        https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh \
+        --default-toolchain "${RUST_VERSION}" \
+        --profile minimal \
+        --no-modify-path \
+        -y \
+    && rm /tmp/rustup-init.sh \
+    && rustc --version \
+    && cargo --version \
+    && node --version \
+    && npm --version
+
+ARG TAURI_CLI_VERSION=2.11.4
+
+RUN cargo install tauri-cli \
+        --version "=${TAURI_CLI_VERSION}" \
+        --locked \
+    && cargo tauri --version
+
+# Tauri otherwise downloads these AppImage helpers from moving tags/branches
+# during every cold build. Keep the exact known-good bytes in the builder and
+# seed Tauri's writable cache from them at runtime.
+ENV PIXIV_SLIDES_TAURI_TOOLS_DIR=/usr/local/share/pixiv-slides/tauri-tools
+
+ARG APPRUN_SHA256=f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
+# Tauri clears linuxdeploy's AppImage magic bytes in its writable cache before
+# running it, so this is the checksum of the pristine downloaded image.
+ARG LINUXDEPLOY_SHA256=e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef
+ARG LINUXDEPLOY_GTK_SHA256=cb379f9b0733e9ad9f8bd78f8c2fa038aef2478523bb7d4c8e64ff6a1ea3501a
+ARG LINUXDEPLOY_GSTREAMER_SHA256=c107b49d84edbffc6ab226ed1007e0626a4f7aa2c3a36b7782bef62351d49e94
+ARG LINUXDEPLOY_APPIMAGE_SHA256=1da16a46fa5e058ae740e7c35ed0d36d86cb869ac9cc8a5fd9a1847d7978d99a
+
+RUN mkdir -p "$PIXIV_SLIDES_TAURI_TOOLS_DIR" \
+    && curl --fail --show-error --location --retry 3 \
+        https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
+        -o "$PIXIV_SLIDES_TAURI_TOOLS_DIR/AppRun-x86_64" \
+    && curl --fail --show-error --location --retry 3 \
+        https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage \
+        -o "$PIXIV_SLIDES_TAURI_TOOLS_DIR/linuxdeploy-x86_64.AppImage" \
+    && curl --fail --show-error --location --retry 3 \
+        https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/b5eb8d05b4c0ed40107fe2158c5d8527f94568ef/linuxdeploy-plugin-gtk.sh \
+        -o "$PIXIV_SLIDES_TAURI_TOOLS_DIR/linuxdeploy-plugin-gtk.sh" \
+    && curl --fail --show-error --location --retry 3 \
+        https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/2a2e67491c32995a3f279ad0ecbe77abd512b42a/linuxdeploy-plugin-gstreamer.sh \
+        -o "$PIXIV_SLIDES_TAURI_TOOLS_DIR/linuxdeploy-plugin-gstreamer.sh" \
+    && curl --fail --show-error --location --retry 3 \
+        https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage \
+        -o "$PIXIV_SLIDES_TAURI_TOOLS_DIR/linuxdeploy-plugin-appimage.AppImage" \
+    && printf '%s  %s\n' \
+        "$APPRUN_SHA256" AppRun-x86_64 \
+        "$LINUXDEPLOY_SHA256" linuxdeploy-x86_64.AppImage \
+        "$LINUXDEPLOY_GTK_SHA256" linuxdeploy-plugin-gtk.sh \
+        "$LINUXDEPLOY_GSTREAMER_SHA256" linuxdeploy-plugin-gstreamer.sh \
+        "$LINUXDEPLOY_APPIMAGE_SHA256" linuxdeploy-plugin-appimage.AppImage \
+        > "$PIXIV_SLIDES_TAURI_TOOLS_DIR/SHA256SUMS" \
+    && cd "$PIXIV_SLIDES_TAURI_TOOLS_DIR" \
+    && sha256sum --check SHA256SUMS \
+    && chmod 0755 \
+        AppRun-x86_64 \
+        linuxdeploy-x86_64.AppImage \
+        linuxdeploy-plugin-gtk.sh \
+        linuxdeploy-plugin-gstreamer.sh \
+        linuxdeploy-plugin-appimage.AppImage
+
+COPY entrypoint.sh /usr/local/bin/pixiv-slides-linux-build
+
+RUN chmod 0755 /usr/local/bin/pixiv-slides-linux-build \
+    && mkdir -p \
+        /cache/cargo/git \
+        /cache/cargo/registry \
+        /cache/npm \
+        /cache/target \
+        /cache/tauri \
+        /output \
+        /source \
+        /workspace
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/pixiv-slides-linux-build"]

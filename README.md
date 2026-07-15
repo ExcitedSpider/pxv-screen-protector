@@ -62,13 +62,20 @@ not shell out.
 
 ## Requirements
 
+For a release build, the host needs [Podman](https://podman.io/) plus the
+standard Linux command-line tools used by `dev.sh` (Bash, coreutils, Git, and
+`flock`). The default `./dev.sh build` uses the project's Ubuntu builder image,
+which supplies Rust, Node.js, Tauri, WebKitGTK, and the Linux packaging tools.
+
+Host development additionally requires:
+
 - Linux with a graphical Wayland or X11 session.
 - Rust stable and the Tauri CLI.
 - WebKitGTK system libraries for Tauri.
-- [Podman](https://podman.io/) for the frontend toolchain. Node/Vite run in a
-  container, so Node does not need to be installed on the host.
+- Podman for the frontend toolchain. Node/Vite run in a container, so Node does
+  not need to be installed on the host.
 
-Fedora system packages:
+Fedora host-development packages:
 
 ```bash
 sudo dnf install webkit2gtk4.1-devel libsoup3-devel openssl-devel \
@@ -176,14 +183,71 @@ The Tauri `beforeDevCommand` starts Vite through
 uses `--replace`.
 
 The wrapper also exposes the common build and validation commands. Additional
-arguments are forwarded to Cargo/Tauri for `dev`, `build`, `check`, and `test`:
+arguments are forwarded to Tauri for `dev` and `build-host`, or to Cargo for
+`check` and `test`. The controlled `build` command forwards release-compatible
+Tauri options but rejects debug builds, alternate configs/runners, non-x86-64
+targets, and no-bundle invocations so its output contract stays stable:
 
 ```bash
 ./dev.sh build [TAURI_BUILD_ARGS...]
+./dev.sh build-image
+./dev.sh build-clean
+./dev.sh build-host [TAURI_BUILD_ARGS...]
 ./dev.sh check [CARGO_CHECK_ARGS...]
 ./dev.sh test [CARGO_TEST_ARGS...]
 ./dev.sh frontend-build
 ```
+
+### Controlled Linux Release Builds
+
+`./dev.sh build` packages the application inside the pinned Ubuntu 22.04
+builder. The repository is mounted read-only, copied to a disposable container
+workspace, and built without access to the host's Podman socket. The build is
+staged and published only after validation, so a failed attempt does not
+overwrite the previous successful artifacts.
+
+The default Tauri target is `all`. On Linux, that means all configured package
+formats: DEB, RPM, and AppImage. It does not mean all CPU architectures. The
+current controlled builder is intentionally pinned to native x86-64 and
+publishes under:
+
+```text
+builds/<app-version>/linux-x86_64/
+```
+
+That directory contains the `.deb`, `.rpm`, and `.AppImage` packages plus
+`SHA256SUMS` and `build-info.txt`. The top-level `dist/` directory is only the
+Vite frontend output; installable desktop packages are always under `builds/`.
+
+Tauri prints paths under `/cache/target` while it compiles and bundles. Those
+are intermediate paths inside the build environment, not the paths consumers
+should use. After validation, the host workflow publishes each package into
+the repository directory above, prints every repository-relative package path,
+and stops and removes the temporary build container. Consume packages only
+from `builds/<app-version>/linux-<arch>/`.
+
+The first build needs network access to create the builder image and download
+the Rust, npm, Cargo, and Tauri build inputs. AppImage helper binaries and
+scripts are checksum-pinned in that image instead of being taken directly from
+Tauri's moving upstream tags on each cold build. Later builds reuse Podman
+image layers and project-scoped package/compilation caches. The related
+commands are:
+
+- `./dev.sh build-image` — explicitly build or refresh the controlled builder.
+- `./dev.sh build-clean` — remove only this project's builder image, named
+  build-cache volumes, and stale staging directories. It does not remove a
+  successful `builds/<app-version>/` directory or perform a global Podman
+  prune.
+- `./dev.sh build-host` — run Tauri packaging directly on the host, using the
+  host-development dependencies listed above.
+
+Tauri invokes `linuxdeploy` because its AppImage bundler uses it to assemble
+the AppDir and collect Linux desktop libraries; DEB and RPM packaging do not
+use it. Keeping that step in Ubuntu 22.04 avoids depending on a newer host
+distribution's binary utilities and development packages—the source of common
+`failed to run linuxdeploy` errors. If the controlled AppImage step fails,
+rebuild the pinned tool image with `./dev.sh build-image` and rerun
+`./dev.sh build`; the terminal log identifies the failed packaging stage.
 
 The Rust backend logs save, bookmark, and follow decisions and API durations at
 info level. Logs appear in the launch terminal and, through `tauri-plugin-log`,

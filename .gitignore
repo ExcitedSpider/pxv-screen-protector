@@ -12,6 +12,7 @@ secrets.*
 /src-tauri/target/
 /src-tauri/gen/schemas
 target/
+/builds/
 
 # --- Node / Vite frontend ---
 node_modules/
