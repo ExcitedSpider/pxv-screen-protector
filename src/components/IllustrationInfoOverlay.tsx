@@ -94,7 +94,7 @@ export function IllustrationInfoOverlay({
     <div
       aria-label="Illustration information"
       aria-modal="true"
-      className="fixed inset-0 z-[80] bg-black/[0.88] px-6 py-8 text-white backdrop-blur-md"
+      className="fixed inset-0 z-[80] cursor-auto select-text bg-black/[0.88] px-6 py-8 text-white backdrop-blur-md"
       role="dialog"
     >
       <div className="mx-auto flex h-full max-w-[980px] flex-col overflow-hidden">

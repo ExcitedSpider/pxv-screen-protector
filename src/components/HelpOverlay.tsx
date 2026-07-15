@@ -63,7 +63,7 @@ export function HelpOverlay({
     : "none";
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/[0.88] px-6 py-8 text-white backdrop-blur-md">
+    <div className="fixed inset-0 z-[80] cursor-auto select-text bg-black/[0.88] px-6 py-8 text-white backdrop-blur-md">
       <div className="mx-auto flex h-full max-w-[980px] flex-col overflow-hidden">
         <div className="mb-6 flex items-baseline justify-between gap-6">
           <div>
