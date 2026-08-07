@@ -72,9 +72,12 @@ export interface FollowingDailyHelp {
   empty_day_fallback: boolean;
 }
 
+export type AspectRatioFilter = "any" | "horizontal" | "vertical";
+
 export interface TagSearchHelp {
   tags: string[];
   exclude_tags: string[];
+  aspect_ratio: AspectRatioFilter;
   follow_when_bookmark: boolean;
   range_days: number;
   search_target: string;

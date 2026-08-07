@@ -155,6 +155,10 @@ export function HelpOverlay({
                 <ConfigRow label="Tags" value={tagTags} />
                 <ConfigRow label="Excluded tags" value={excludedTags} />
                 <ConfigRow
+                  label="Aspect ratio"
+                  value={help?.tag_search.aspect_ratio ?? "any"}
+                />
+                <ConfigRow
                   label="Public follow on bookmark"
                   value={boolText(help?.tag_search.follow_when_bookmark)}
                 />

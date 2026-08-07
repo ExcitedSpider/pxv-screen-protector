@@ -1,6 +1,6 @@
 //! Loads the user's config from ~/.config/pixiv-slides/config.toml
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,6 +53,9 @@ pub struct TagFeedConfig {
     /// Discard search results containing any of these Pixiv tags.
     #[serde(default)]
     pub exclude_tags: Vec<String>,
+    /// Keep illustrations matching this orientation: `any`, `horizontal`, or `vertical`.
+    #[serde(default)]
+    pub aspect_ratio: AspectRatioFilter,
     /// Search range in local days, inclusive of today.
     #[serde(default = "default_tag_range_days")]
     pub range_days: i64,
@@ -85,12 +88,22 @@ pub struct TagFeedConfig {
     pub recency_decay_lambda: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AspectRatioFilter {
+    #[default]
+    Any,
+    Horizontal,
+    Vertical,
+}
+
 impl Default for TagFeedConfig {
     fn default() -> Self {
         Self {
             follow_when_bookmark: false,
             tags: Vec::new(),
             exclude_tags: Vec::new(),
+            aspect_ratio: AspectRatioFilter::Any,
             range_days: default_tag_range_days(),
             search_target: default_search_target(),
             sort: default_search_sort(),
@@ -181,7 +194,7 @@ pub fn load() -> Result<Config, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{AspectRatioFilter, Config};
 
     #[test]
     fn follow_when_bookmark_defaults_to_false() {
@@ -205,6 +218,46 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.tag_feed.exclude_tags, ["AI生成", "R-18"]);
+    }
+
+    #[test]
+    fn aspect_ratio_defaults_to_any() {
+        let config: Config = toml::from_str("refresh_token = \"token\"").unwrap();
+
+        assert_eq!(config.tag_feed.aspect_ratio, AspectRatioFilter::Any);
+    }
+
+    #[test]
+    fn aspect_ratio_accepts_supported_values() {
+        for (value, expected) in [
+            ("any", AspectRatioFilter::Any),
+            ("horizontal", AspectRatioFilter::Horizontal),
+            ("vertical", AspectRatioFilter::Vertical),
+        ] {
+            let text =
+                format!("refresh_token = \"token\"\n\n[tag_feed]\naspect_ratio = \"{value}\"");
+            let config: Config = toml::from_str(&text).unwrap();
+
+            assert_eq!(config.tag_feed.aspect_ratio, expected);
+        }
+    }
+
+    #[test]
+    fn aspect_ratio_rejects_unsupported_values() {
+        let error = toml::from_str::<Config>(
+            "refresh_token = \"token\"\n\n[tag_feed]\naspect_ratio = \"square\"",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown variant `square`"));
+    }
+
+    #[test]
+    fn aspect_ratio_serializes_with_config_spelling() {
+        assert_eq!(
+            serde_json::to_string(&AspectRatioFilter::Horizontal).unwrap(),
+            "\"horizontal\""
+        );
     }
 
     #[test]

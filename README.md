@@ -52,6 +52,8 @@ timezone, and optionally falls back to today so far when yesterday is empty.
 `/v1/search/illust`, bounded by `max_results_per_tag` and
 `max_search_pages_per_tag`. Results are deduplicated by illustration id, sorted
 by `merge_strategy`, expanded into slides, then capped by `max_slides`.
+The Pixiv App API has no aspect-ratio search parameter, so `aspect_ratio`
+filters each returned work locally using its reported width and height.
 When both `bookmark_on_save` and `follow_when_bookmark` are enabled, a successful
 tag-feed save and bookmark also publicly follows the work's author.
 
@@ -158,6 +160,7 @@ cache_max_mb = 512
 [tag_feed]
 tags = ["landscape", "original"]
 exclude_tags = ["AI生成", "R-18"]
+aspect_ratio = "horizontal"
 follow_when_bookmark = true
 range_days = 30
 search_target = "exact_match_for_tags"
@@ -362,6 +365,7 @@ Tag feed config:
 [tag_feed]
 tags = ["landscape", "original"]     # searched independently, then merged
 exclude_tags = []                     # discard works carrying any exact tag match
+aspect_ratio = "any"                  # "any", "horizontal", or "vertical"
 follow_when_bookmark = false         # publicly follow after a successful tag-feed bookmark
 range_days = 30                      # local days, inclusive of today
 search_target = "exact_match_for_tags"
@@ -416,17 +420,28 @@ the app keeps up to 150 tag-results across the five per-tag samples. Tag
 exclusion uses fetch-then-discard filtering: the Pixiv search request is
 unchanged, and the app discards a work locally when a returned tag name exactly
 matches an entry in `exclude_tags`. A tag cannot appear in both `tags` and
-`exclude_tags`; that is reported as invalid configuration. Excluded works, like
-works filtered by `avoid_nsfw`, do not consume a per-tag result cap, so the app
-can scan additional results up to `max_search_pages_per_tag`. It then filters out
-anything below `min_bookmarks`, deduplicates the survivors, sorts them, expands
+`exclude_tags`; that is reported as invalid configuration.
+
+Aspect-ratio filtering is also local because `/v1/search/illust` has no
+orientation parameter. `horizontal` accepts works whose width is greater than
+their height, `vertical` accepts works whose height is greater than their
+width, and `any` (the default) performs no ratio filtering. With `horizontal`
+or `vertical`, square works and works with missing or zero dimensions are
+discarded. Pixiv supplies these dimensions for the work rather than each
+individual page, so a multi-page work and all of its expanded pages are
+accepted or discarded together.
+
+Works discarded by tag exclusion, aspect ratio, or `avoid_nsfw` do not consume
+the per-tag result cap. The app can therefore scan additional results for
+replacements up to `max_search_pages_per_tag`. It then filters out anything
+below `min_bookmarks`, deduplicates the survivors, sorts them, expands
 multi-page posts up to `max_pages_per_post`, and stops at 120 slides. Because
 `max_slides` counts slides, not illustrations, multi-page posts can reduce the
 number of distinct works shown.
 
-Configuration is read each time the feed loads. After changing `avoid_nsfw` or
-`exclude_tags`, press `r` to reload the active feed; restarting the app is not
-required.
+Configuration is read each time the feed loads. After changing `avoid_nsfw`,
+`exclude_tags`, or `aspect_ratio`, press `r` to reload the active feed;
+restarting the app is not required.
 
 ## Privacy
 

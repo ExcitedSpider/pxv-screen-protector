@@ -115,6 +115,7 @@ struct SearchCandidate {
 struct SearchFilterCounts {
     nsfw: usize,
     excluded_tag: usize,
+    aspect_ratio: usize,
 }
 
 fn normalize_tags(raw: &[String]) -> Vec<String> {
@@ -151,6 +152,25 @@ fn should_filter_excluded_tag(illust: &Illust, exclude_tags: &[String]) -> bool 
             .iter()
             .any(|excluded| excluded == &illust_tag.name)
     })
+}
+
+fn should_filter_aspect_ratio(
+    illust: &Illust,
+    aspect_ratio: &crate::config::AspectRatioFilter,
+) -> bool {
+    use crate::config::AspectRatioFilter;
+
+    match aspect_ratio {
+        AspectRatioFilter::Any => false,
+        AspectRatioFilter::Horizontal => !matches!(
+            (illust.width, illust.height),
+            (Some(width), Some(height)) if width > 0 && height > 0 && width > height
+        ),
+        AspectRatioFilter::Vertical => !matches!(
+            (illust.width, illust.height),
+            (Some(width), Some(height)) if width > 0 && height > 0 && height > width
+        ),
+    }
 }
 
 fn should_filter_nsfw(illust: &Illust, avoid_nsfw: bool) -> bool {
@@ -407,6 +427,7 @@ pub async fn fetch_tag_slides(
             max_search_pages,
             avoid_nsfw,
             &exclude_tags,
+            &tag_cfg.aspect_ratio,
         )
         .await
         {
@@ -426,6 +447,7 @@ pub async fn fetch_tag_slides(
                             max_search_pages,
                             avoid_nsfw,
                             &exclude_tags,
+                            &tag_cfg.aspect_ratio,
                         )
                         .await?;
                         local.sort_by(|a, b| {
@@ -529,6 +551,7 @@ async fn search_tag(
     page_limit: usize,
     avoid_nsfw: bool,
     exclude_tags: &[String],
+    aspect_ratio: &crate::config::AspectRatioFilter,
 ) -> Result<Vec<SearchCandidate>, String> {
     let start_s = start.to_string();
     let end_s = end.to_string();
@@ -555,6 +578,7 @@ async fn search_tag(
             result_limit,
             avoid_nsfw,
             exclude_tags,
+            aspect_ratio,
         );
         if filtered.nsfw > 0 {
             log::info!(
@@ -575,6 +599,16 @@ async fn search_tag(
                 exclude_tags.len()
             );
         }
+        if filtered.aspect_ratio > 0 {
+            log::info!(
+                "event=aspect_ratio_filter feed_mode=tag_search tag={:?} sort={:?} page={} filtered={} configured_filter={:?}",
+                tag,
+                sort,
+                page,
+                filtered.aspect_ratio,
+                aspect_ratio
+            );
+        }
         if out.len() >= result_limit {
             return Ok(out);
         }
@@ -592,6 +626,7 @@ fn append_search_candidates(
     result_limit: usize,
     avoid_nsfw: bool,
     exclude_tags: &[String],
+    aspect_ratio: &crate::config::AspectRatioFilter,
 ) -> SearchFilterCounts {
     if out.len() >= result_limit {
         return SearchFilterCounts::default();
@@ -604,6 +639,10 @@ fn append_search_candidates(
         }
         if should_filter_excluded_tag(&illust, exclude_tags) {
             filtered.excluded_tag += 1;
+            continue;
+        }
+        if should_filter_aspect_ratio(&illust, aspect_ratio) {
+            filtered.aspect_ratio += 1;
             continue;
         }
         out.push(SearchCandidate {
@@ -797,9 +836,11 @@ fn url_host(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::AspectRatioFilter;
+
     use super::{
-        append_search_candidates, normalize_tag_filters, push_slides, should_filter_excluded_tag,
-        should_filter_nsfw, Illust,
+        append_search_candidates, normalize_tag_filters, push_slides, should_filter_aspect_ratio,
+        should_filter_excluded_tag, should_filter_nsfw, Illust,
     };
 
     fn test_illust(user_extra: &str, illust_extra: &str) -> Illust {
@@ -921,6 +962,14 @@ mod tests {
         .unwrap();
         let mut slides = Vec::new();
 
+        assert!(!should_filter_aspect_ratio(
+            &illust,
+            &AspectRatioFilter::Vertical
+        ));
+        assert!(should_filter_aspect_ratio(
+            &illust,
+            &AspectRatioFilter::Horizontal
+        ));
         push_slides(&mut slides, &illust, 2, &[], None, None, None);
 
         assert_eq!(slides.len(), 2);
@@ -958,16 +1007,84 @@ mod tests {
     }
 
     #[test]
+    fn aspect_ratio_filter_matches_work_level_orientation() {
+        let horizontal = test_illust("", r#", "width": 1600, "height": 900"#);
+        let vertical = test_illust("", r#", "width": 900, "height": 1600"#);
+        let square = test_illust("", r#", "width": 1000, "height": 1000"#);
+        let missing = test_illust("", "");
+        let zero = test_illust("", r#", "width": 0, "height": 1000"#);
+
+        assert!(!should_filter_aspect_ratio(
+            &horizontal,
+            &AspectRatioFilter::Any
+        ));
+        assert!(!should_filter_aspect_ratio(
+            &missing,
+            &AspectRatioFilter::Any
+        ));
+        assert!(!should_filter_aspect_ratio(&zero, &AspectRatioFilter::Any));
+
+        assert!(!should_filter_aspect_ratio(
+            &horizontal,
+            &AspectRatioFilter::Horizontal
+        ));
+        assert!(should_filter_aspect_ratio(
+            &vertical,
+            &AspectRatioFilter::Horizontal
+        ));
+        assert!(should_filter_aspect_ratio(
+            &square,
+            &AspectRatioFilter::Horizontal
+        ));
+        assert!(should_filter_aspect_ratio(
+            &missing,
+            &AspectRatioFilter::Horizontal
+        ));
+        assert!(should_filter_aspect_ratio(
+            &zero,
+            &AspectRatioFilter::Horizontal
+        ));
+
+        assert!(!should_filter_aspect_ratio(
+            &vertical,
+            &AspectRatioFilter::Vertical
+        ));
+        assert!(should_filter_aspect_ratio(
+            &horizontal,
+            &AspectRatioFilter::Vertical
+        ));
+        assert!(should_filter_aspect_ratio(
+            &square,
+            &AspectRatioFilter::Vertical
+        ));
+        assert!(should_filter_aspect_ratio(
+            &missing,
+            &AspectRatioFilter::Vertical
+        ));
+        assert!(should_filter_aspect_ratio(
+            &zero,
+            &AspectRatioFilter::Vertical
+        ));
+    }
+
+    #[test]
     fn filtered_search_results_do_not_consume_the_accepted_result_limit() {
         let restricted = test_illust("", ", \"x_restrict\": 1");
         let general = test_illust("", ", \"x_restrict\": 0");
         let mut candidates = Vec::new();
 
-        let filtered =
-            append_search_candidates(&mut candidates, vec![restricted, general], 1, true, &[]);
+        let filtered = append_search_candidates(
+            &mut candidates,
+            vec![restricted, general],
+            1,
+            true,
+            &[],
+            &AspectRatioFilter::Any,
+        );
 
         assert_eq!(filtered.nsfw, 1);
         assert_eq!(filtered.excluded_tag, 0);
+        assert_eq!(filtered.aspect_ratio, 0);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].illust.x_restrict, Some(0));
     }
@@ -1031,32 +1148,61 @@ mod tests {
             1,
             false,
             &["AI生成".to_string()],
+            &AspectRatioFilter::Any,
         );
 
         assert_eq!(filtered.nsfw, 0);
         assert_eq!(filtered.excluded_tag, 1);
+        assert_eq!(filtered.aspect_ratio, 0);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].illust.tags[0].name, "風景");
     }
 
     #[test]
-    fn nsfw_and_excluded_tag_filters_work_together() {
-        let restricted = test_illust("", ", \"x_restrict\": 1");
-        let excluded = test_illust("", r#", "tags": [{"name": "AI生成"}], "x_restrict": 0"#);
-        let allowed = test_illust("", ", \"x_restrict\": 0");
+    fn aspect_ratio_filtered_results_do_not_consume_the_accepted_result_limit() {
+        let vertical = test_illust("", r#", "width": 900, "height": 1600"#);
+        let horizontal = test_illust("", r#", "width": 1600, "height": 900"#);
         let mut candidates = Vec::new();
 
         let filtered = append_search_candidates(
             &mut candidates,
-            vec![restricted, excluded, allowed],
+            vec![vertical, horizontal],
+            1,
+            false,
+            &[],
+            &AspectRatioFilter::Horizontal,
+        );
+
+        assert_eq!(filtered.nsfw, 0);
+        assert_eq!(filtered.excluded_tag, 0);
+        assert_eq!(filtered.aspect_ratio, 1);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].illust.width, Some(1600));
+        assert_eq!(candidates[0].illust.height, Some(900));
+    }
+
+    #[test]
+    fn nsfw_excluded_tag_and_aspect_ratio_filters_work_together() {
+        let restricted = test_illust("", ", \"x_restrict\": 1");
+        let excluded = test_illust("", r#", "tags": [{"name": "AI生成"}], "x_restrict": 0"#);
+        let vertical = test_illust("", r#", "width": 900, "height": 1600, "x_restrict": 0"#);
+        let allowed = test_illust("", r#", "width": 1600, "height": 900, "x_restrict": 0"#);
+        let mut candidates = Vec::new();
+
+        let filtered = append_search_candidates(
+            &mut candidates,
+            vec![restricted, excluded, vertical, allowed],
             1,
             true,
             &["AI生成".to_string()],
+            &AspectRatioFilter::Horizontal,
         );
 
         assert_eq!(filtered.nsfw, 1);
         assert_eq!(filtered.excluded_tag, 1);
+        assert_eq!(filtered.aspect_ratio, 1);
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].illust.tags.is_empty());
+        assert_eq!(candidates[0].illust.width, Some(1600));
     }
 }
