@@ -456,6 +456,12 @@ the same style used by pixivpy-based tools.
 When `bookmark_on_save = true`, pressing `s` writes the local file first, then
 adds a Pixiv bookmark through the app API. Bookmarks are private by default.
 
+The bookmark and follow calls run *after* the save is confirmed, not as part of
+it: `s` reports `Saved · <file>` as soon as the image is on disk, and the Pixiv
+requests continue in the background. A second toast appears only if something
+was actually added or a call failed, so a slow Pixiv API never delays the save
+confirmation or blocks saving the next illustration.
+
 When `[tag_feed].follow_when_bookmark = true` as well, a successful bookmark
 made from the active tag feed is followed by a public follow of the work's
 author. Following is skipped in following-feed mode and when saving or

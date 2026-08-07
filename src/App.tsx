@@ -11,6 +11,7 @@ import {
   getApplicationInfo,
   systemStats,
   saveIllustration,
+  bookmarkAndFollow,
   quit,
   pximg,
   type FeedMode,
@@ -53,12 +54,50 @@ export default function App() {
   const currentRef = useRef<Slide | undefined>(undefined);
   const feedModeRef = useRef<FeedMode | null>(null);
   const saveInFlight = useRef(false);
+  // Illustrations whose bookmark/follow calls are still running, so repeat
+  // presses on the same slide don't fire duplicate Pixiv requests.
+  const bookmarksInFlight = useRef(new Set<number>());
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  // Bookmark/follow runs detached from the save: the toast already said
+  // "Saved", so this only reports back when Pixiv actually changed something
+  // (or failed).
+  const bookmarkInBackground = useCallback(
+    (slide: Slide, mode: FeedMode) => {
+      if (bookmarksInFlight.current.has(slide.illust_id)) return;
+      bookmarksInFlight.current.add(slide.illust_id);
+      bookmarkAndFollow(slide, mode)
+        .then((result) => {
+          setSlides((currentSlides) =>
+            // Bookmarking can only add bookmarks/follows. Preserve fresher feed
+            // state when this request began from an older slide snapshot.
+            currentSlides.map((item) => ({
+              ...item,
+              is_bookmarked:
+                item.illust_id === slide.illust_id &&
+                result.is_bookmarked === true
+                  ? true
+                  : item.is_bookmarked,
+              is_followed:
+                item.user_id === slide.user_id && result.is_followed === true
+                  ? true
+                  : item.is_followed,
+            })),
+          );
+          if (result.message) showToast(result.message);
+        })
+        .catch((err) => showToast("Bookmark failed: " + String(err)))
+        .finally(() => {
+          bookmarksInFlight.current.delete(slide.illust_id);
+        });
+    },
+    [showToast],
+  );
 
   const stepSlides = useCallback((delta: number) => {
     setIdx((i) => {
@@ -214,24 +253,9 @@ export default function App() {
           saveInFlight.current = true;
           showToast("Saving…");
           saveIllustration(slide, mode)
-            .then((result) => {
-              setSlides((currentSlides) =>
-                // Saves can only add bookmarks/follows. Preserve fresher feed
-                // state when this request began from an older slide snapshot.
-                currentSlides.map((item) => ({
-                  ...item,
-                  is_bookmarked:
-                    item.illust_id === slide.illust_id &&
-                    result.is_bookmarked === true
-                      ? true
-                      : item.is_bookmarked,
-                  is_followed:
-                    item.user_id === slide.user_id && result.is_followed === true
-                      ? true
-                      : item.is_followed,
-                })),
-              );
-              showToast(result.message);
+            .then((message) => {
+              showToast(message);
+              bookmarkInBackground(slide, mode);
             })
             .catch((err) => showToast("Save failed: " + String(err)))
             .finally(() => {
@@ -246,7 +270,14 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, load, showToast, activeOverlay, stepSlides]);
+  }, [
+    slides.length,
+    load,
+    showToast,
+    activeOverlay,
+    stepSlides,
+    bookmarkInBackground,
+  ]);
 
   // System stats, every 2s.
   useEffect(() => {

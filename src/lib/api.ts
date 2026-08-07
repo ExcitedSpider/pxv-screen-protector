@@ -35,8 +35,9 @@ export interface SaveRequest extends Slide {
   feed_mode: FeedMode;
 }
 
-export interface SaveIllustrationResult {
-  message: string;
+export interface BookmarkFollowResult {
+  /** `null` when nothing was added and nothing failed — no toast needed. */
+  message: string | null;
   is_bookmarked: boolean | null;
   is_followed: boolean | null;
 }
@@ -107,9 +108,18 @@ export const getApplicationInfo = () =>
 export const systemStats = () => invoke<SystemStats>("system_stats");
 export const quit = () => invoke("quit");
 
-/** Save the illustration and return its latest known bookmark/follow state. */
+/** Write the image to the local save folder. Returns the status for the toast. */
 export const saveIllustration = (slide: Slide, mode: FeedMode) =>
-  invoke<SaveIllustrationResult>("save_illustration", {
+  invoke<string>("save_illustration", {
+    slide: { ...slide, feed_mode: mode } satisfies SaveRequest,
+  });
+
+/**
+ * Bookmark the illustration and, when configured, follow its author. Fired
+ * after `saveIllustration` resolves so Pixiv's latency stays off the save path.
+ */
+export const bookmarkAndFollow = (slide: Slide, mode: FeedMode) =>
+  invoke<BookmarkFollowResult>("bookmark_and_follow", {
     slide: { ...slide, feed_mode: mode } satisfies SaveRequest,
   });
 

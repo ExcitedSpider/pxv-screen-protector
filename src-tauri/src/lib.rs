@@ -144,20 +144,53 @@ pub struct ApplicationInfo {
 }
 
 #[derive(Serialize)]
-pub struct SaveIllustrationResult {
-    message: String,
+pub struct BookmarkFollowResult {
+    /// `None` when nothing was added and nothing failed, so the frontend can
+    /// leave the save confirmation on screen instead of replacing it with a
+    /// second, redundant toast.
+    message: Option<String>,
     is_bookmarked: Option<bool>,
     is_followed: Option<bool>,
 }
 
-impl SaveIllustrationResult {
+impl BookmarkFollowResult {
     fn new(message: String, is_bookmarked: Option<bool>, is_followed: Option<bool>) -> Self {
         Self {
-            message,
+            message: Some(message),
             is_bookmarked,
             is_followed,
         }
     }
+
+    /// Nothing worth reporting happened — carry state back without a toast.
+    fn quiet(is_bookmarked: Option<bool>, is_followed: Option<bool>) -> Self {
+        Self {
+            message: None,
+            is_bookmarked,
+            is_followed,
+        }
+    }
+
+    fn from_parts(
+        parts: [Option<String>; 2],
+        is_bookmarked: Option<bool>,
+        is_followed: Option<bool>,
+    ) -> Self {
+        Self {
+            message: join_status(parts),
+            is_bookmarked,
+            is_followed,
+        }
+    }
+}
+
+/// Join the bookmark/follow statuses that actually have something to report.
+fn join_status(parts: [Option<String>; 2]) -> Option<String> {
+    let reported: Vec<String> = parts.into_iter().flatten().collect();
+    if reported.is_empty() {
+        return None;
+    }
+    Some(reported.join(" · "))
 }
 
 #[derive(Serialize)]
@@ -355,34 +388,46 @@ fn system_stats() -> system::SystemStats {
     system::collect()
 }
 
-/// Save the currently-viewed illustration to the configured folder, and
-/// optionally add a Pixiv bookmark and follow its author when configured.
+/// Save the currently-viewed illustration to the configured folder. This is
+/// deliberately local-only: the Pixiv bookmark/follow calls live in
+/// `bookmark_and_follow`, which the frontend fires afterwards so a slow Pixiv
+/// API never holds back the save confirmation.
 #[tauri::command]
-async fn save_illustration(
-    slide: save::SaveRequest,
-    followed_authors: tauri::State<'_, FollowedAuthors>,
-    bookmarked_illustrations: tauri::State<'_, BookmarkedIllustrations>,
-) -> Result<SaveIllustrationResult, String> {
+async fn save_illustration(slide: save::SaveRequest) -> Result<String, String> {
     let cfg = config::load()?;
     let dir = save::resolve_dir(&cfg.save_dir);
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| format!("http client build failed: {e}"))?;
-    let save_status = match save::save(&client, &slide, &dir).await {
-        Ok(status) => status,
-        Err(err) => {
-            log::info!(
-                "event=bookmark_skipped illust_id={} reason=save_failure",
-                slide.illust_id
-            );
-            log::info!(
-                "event=follow_skipped user_id={} illust_id={} reason=save_failure",
-                slide.user_id,
-                slide.illust_id
-            );
-            return Err(err);
-        }
-    };
+    let result = save::save(&client, &slide, &dir).await;
+    if result.is_err() {
+        // The frontend skips `bookmark_and_follow` when the save fails.
+        log::info!(
+            "event=bookmark_skipped illust_id={} reason=save_failure",
+            slide.illust_id
+        );
+        log::info!(
+            "event=follow_skipped user_id={} illust_id={} reason=save_failure",
+            slide.user_id,
+            slide.illust_id
+        );
+    }
+    result
+}
+
+/// Add the Pixiv bookmark for a just-saved illustration and, when configured,
+/// publicly follow its author. Runs after `save_illustration` has already
+/// reported success, so its latency is off the save path.
+#[tauri::command]
+async fn bookmark_and_follow(
+    slide: save::SaveRequest,
+    followed_authors: tauri::State<'_, FollowedAuthors>,
+    bookmarked_illustrations: tauri::State<'_, BookmarkedIllustrations>,
+) -> Result<BookmarkFollowResult, String> {
+    let cfg = config::load()?;
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("http client build failed: {e}"))?;
 
     let pixiv_bookmarked = slide.is_bookmarked == Some(true);
     let session_bookmarked = bookmarked_illustrations.contains(slide.illust_id);
@@ -409,11 +454,7 @@ async fn save_illustration(
             slide.user_id,
             slide.illust_id
         );
-        return Ok(SaveIllustrationResult::new(
-            save_status,
-            is_bookmarked,
-            is_followed,
-        ));
+        return Ok(BookmarkFollowResult::quiet(is_bookmarked, is_followed));
     }
 
     let already_bookmarked = pixiv_bookmarked || session_bookmarked;
@@ -440,7 +481,8 @@ async fn save_illustration(
             slide.illust_id,
             source
         );
-        "Already bookmarked".to_string()
+        // Nothing changed, so there is nothing to announce.
+        None
     } else {
         let started = Instant::now();
         log::info!(
@@ -463,8 +505,8 @@ async fn save_illustration(
                     slide.illust_id,
                     unconfigured_follow_reason.unwrap_or("bookmark_failure")
                 );
-                return Ok(SaveIllustrationResult::new(
-                    format!("{save_status} · Bookmark failed: {err}"),
+                return Ok(BookmarkFollowResult::new(
+                    format!("Bookmark failed: {err}"),
                     is_bookmarked,
                     is_followed,
                 ));
@@ -489,7 +531,7 @@ async fn save_illustration(
                     started.elapsed().as_millis()
                 );
                 token = Some(refreshed);
-                bookmark_status
+                Some(bookmark_status)
             }
             Err(err) => {
                 log::error!(
@@ -504,15 +546,14 @@ async fn save_illustration(
                     slide.illust_id,
                     unconfigured_follow_reason.unwrap_or("bookmark_failure")
                 );
-                return Ok(SaveIllustrationResult::new(
-                    format!("{save_status} · Bookmark failed: {err}"),
+                return Ok(BookmarkFollowResult::new(
+                    format!("Bookmark failed: {err}"),
                     is_bookmarked,
                     is_followed,
                 ));
             }
         }
     };
-    let status = format!("{save_status} · {bookmark_status}");
 
     if let Some(reason) = unconfigured_follow_reason {
         log::info!(
@@ -521,8 +562,8 @@ async fn save_illustration(
             slide.illust_id,
             reason
         );
-        return Ok(SaveIllustrationResult::new(
-            status,
+        return Ok(BookmarkFollowResult::from_parts(
+            [bookmark_status, None],
             is_bookmarked,
             is_followed,
         ));
@@ -537,8 +578,8 @@ async fn save_illustration(
             slide.illust_id,
             source
         );
-        return Ok(SaveIllustrationResult::new(
-            status,
+        return Ok(BookmarkFollowResult::from_parts(
+            [bookmark_status, None],
             is_bookmarked,
             is_followed,
         ));
@@ -561,8 +602,8 @@ async fn save_illustration(
                     slide.illust_id,
                     started.elapsed().as_millis()
                 );
-                return Ok(SaveIllustrationResult::new(
-                    format!("{status} · Follow failed: {err}"),
+                return Ok(BookmarkFollowResult::from_parts(
+                    [bookmark_status, Some(format!("Follow failed: {err}"))],
                     is_bookmarked,
                     is_followed,
                 ));
@@ -580,8 +621,8 @@ async fn save_illustration(
                 slide.illust_id,
                 started.elapsed().as_millis()
             );
-            Ok(SaveIllustrationResult::new(
-                format!("{status} · {follow_status}"),
+            Ok(BookmarkFollowResult::from_parts(
+                [bookmark_status, Some(follow_status)],
                 is_bookmarked,
                 is_followed,
             ))
@@ -594,8 +635,8 @@ async fn save_illustration(
                 started.elapsed().as_millis(),
                 err
             );
-            Ok(SaveIllustrationResult::new(
-                format!("{status} · Follow failed: {err}"),
+            Ok(BookmarkFollowResult::from_parts(
+                [bookmark_status, Some(format!("Follow failed: {err}"))],
                 is_bookmarked,
                 is_followed,
             ))
@@ -725,6 +766,7 @@ pub fn run() {
             load_slideshow,
             system_stats,
             save_illustration,
+            bookmark_and_follow,
             quit
         ])
         .run(tauri::generate_context!())
@@ -734,9 +776,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_date_from_epoch, reconcile_session_state, should_follow_author,
+        build_date_from_epoch, join_status, reconcile_session_state, should_follow_author,
         BookmarkedIllustrations, FollowedAuthors,
     };
+
+    #[test]
+    fn reports_only_the_bookmark_follow_steps_that_did_something() {
+        assert_eq!(join_status([None, None]), None);
+        assert_eq!(
+            join_status([Some("Bookmarked private".into()), None]),
+            Some("Bookmarked private".to_string())
+        );
+        assert_eq!(
+            join_status([
+                Some("Bookmarked private".into()),
+                Some("Followed artist".into()),
+            ]),
+            Some("Bookmarked private · Followed artist".to_string())
+        );
+        assert_eq!(
+            join_status([None, Some("Follow failed: timeout".into())]),
+            Some("Follow failed: timeout".to_string())
+        );
+    }
 
     #[test]
     fn formats_embedded_build_dates_in_utc() {
